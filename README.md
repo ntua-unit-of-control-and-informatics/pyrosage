@@ -33,7 +33,7 @@ README.md          # You're here
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/your-org/environmental-predictors.git
+   git clone https://github.com/ntua-unit-of-control-and-informatics/pyrosage
    ```
 
 2. Install dependencies:
