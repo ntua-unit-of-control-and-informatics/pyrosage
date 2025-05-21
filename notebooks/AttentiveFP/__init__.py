@@ -1,3 +1,3 @@
-from AttentiveFP.AttentiveLayers import Fingerprint
-from AttentiveFP.AttentiveLayers_viz import Fingerprint_viz
-from AttentiveFP.getFeatures import save_smiles_dicts, get_smiles_dicts, get_smiles_array, moltosvg_highlight
+from .AttentiveLayers import Fingerprint
+from .AttentiveLayers_viz import Fingerprint_viz
+from .getFeatures import save_smiles_dicts, get_smiles_dicts, get_smiles_array, moltosvg_highlight
