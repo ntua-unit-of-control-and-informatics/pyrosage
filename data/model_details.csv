@@ -14,3 +14,4 @@ MP,6,6,200,../models/model_MP.pt
 pKa_acidic,5,2,200,../models/model_pKa_acidic.pt
 pKa_basic,5,4,200,../models/model_pKa_basic.pt
 WS,4,7,200,../models/model_WS.pt
+Z50,5,3,200,../models/models_Z50.pt
