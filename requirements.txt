@@ -3,3 +3,5 @@ torch
 rdkit
 pandas
 matplotlib
+pytdc
+
