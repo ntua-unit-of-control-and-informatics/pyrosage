@@ -175,7 +175,7 @@ def gen_descriptor_data(smilesList):
             arrayrep = array_rep_from_smiles(molgraph)
 
             smiles_to_fingerprint_array[smiles] = arrayrep
-            
+
         except:
             print(smiles)
             time.sleep(3)
@@ -194,19 +194,24 @@ def get_smiles_dicts(smilesList):
     smiles_to_fingerprint_features = gen_descriptor_data(smilesList)
 
     for smiles,arrayrep in smiles_to_fingerprint_features.items():
-        atom_features = arrayrep['atom_features']
-        bond_features = arrayrep['bond_features']
+        try:
 
-        rdkit_list = arrayrep['rdkit_ix']
-        smiles_to_rdkit_list[smiles] = rdkit_list
+            atom_features = arrayrep['atom_features']
+            bond_features = arrayrep['bond_features']
 
-        atom_len,num_atom_features = atom_features.shape
-        bond_len,num_bond_features = bond_features.shape
+            rdkit_list = arrayrep['rdkit_ix']
+            smiles_to_rdkit_list[smiles] = rdkit_list
 
-        if atom_len > max_atom_len:
-            max_atom_len = atom_len
-        if bond_len > max_bond_len:
-            max_bond_len = bond_len
+            atom_len,num_atom_features = atom_features.shape
+            bond_len,num_bond_features = bond_features.shape
+
+            if atom_len > max_atom_len:
+                max_atom_len = atom_len
+            if bond_len > max_bond_len:
+                max_bond_len = bond_len
+        except Exception as e:
+            print(f"Error processing SMILES {smiles}: {str(e)}")
+            continue
 
     #then add 1 so I can zero pad everything
     max_atom_index_num = max_atom_len
@@ -278,7 +283,7 @@ def get_smiles_dicts(smilesList):
 
         smiles_to_atom_neighbors[smiles] = atom_neighbors
         smiles_to_bond_neighbors[smiles] = bond_neighbors
-        
+
         smiles_to_atom_mask[smiles] = mask
 
     del smiles_to_fingerprint_features
@@ -389,7 +394,7 @@ def save_smiles_dicts(smilesList,filename):
 
         smiles_to_atom_neighbors[smiles] = atom_neighbors
         smiles_to_bond_neighbors[smiles] = bond_neighbors
-        
+
         smiles_to_atom_mask[smiles] = mask
 
     del smiles_to_fingerprint_features
@@ -414,12 +419,25 @@ def get_smiles_array(smilesList, feature_dicts):
     x_bonds = []
     x_atom_index = []
     x_bond_index = []
+    valid_smiles = []
     for smiles in smilesList:
-        x_mask.append(feature_dicts['smiles_to_atom_mask'][smiles])
-        x_atom.append(feature_dicts['smiles_to_atom_info'][smiles])
-        x_bonds.append(feature_dicts['smiles_to_bond_info'][smiles])
-        x_atom_index.append(feature_dicts['smiles_to_atom_neighbors'][smiles])
-        x_bond_index.append(feature_dicts['smiles_to_bond_neighbors'][smiles])
+        try:
+            if smiles in feature_dicts['smiles_to_atom_mask']:
+                x_mask.append(feature_dicts['smiles_to_atom_mask'][smiles])
+                x_atom.append(feature_dicts['smiles_to_atom_info'][smiles])
+                x_bonds.append(feature_dicts['smiles_to_bond_info'][smiles])
+                x_atom_index.append(feature_dicts['smiles_to_atom_neighbors'][smiles])
+                x_bond_index.append(feature_dicts['smiles_to_bond_neighbors'][smiles])
+                valid_smiles.append(smiles)
+            else:
+                print(f"Warning: SMILES {smiles} not found in feature dictionaries")
+        except Exception as e:
+            print(f"Error processing SMILES {smiles}: {str(e)}")
+            continue
+
+    if not valid_smiles:
+        raise ValueError("No valid SMILES strings could be processed")
+
     return np.asarray(x_atom),np.asarray(x_bonds),np.asarray(x_atom_index),\
         np.asarray(x_bond_index),np.asarray(x_mask),feature_dicts['smiles_to_rdkit_list']
 
@@ -446,7 +464,7 @@ def rreplace(s, old, new, occurrence):
 
 def moltosvg_highlight(smiles, atom_list, atom_predictions, molecule_prediction,\
     molSize=(280,218),kekulize=False):
-    
+
     mol = Chem.MolFromSmiles(smiles)
     min_pred = 0.05
     max_pred = 0.8
@@ -487,7 +505,7 @@ def moltosvg_highlight(smiles, atom_list, atom_predictions, molecule_prediction,
 
 def moltosvg_highlight_known(smiles, atom_list, atom_predictions, molecule_prediction, molecule_experiment, Number,\
         molSize=(280,218),kekulize=False):
-    
+
     mol = Chem.MolFromSmiles(smiles)
     min_pred = 0.05
     max_pred = 0.8
@@ -529,7 +547,7 @@ def moltosvg_highlight_known(smiles, atom_list, atom_predictions, molecule_predi
 
 def weighted_highlight_known(smiles, atom_list, atom_predictions, molecule_prediction, molecule_experiment, Number,\
         molSize=(128,128)):
-    
+
     mol = Chem.MolFromSmiles(smiles)
     note = '('+ str(Number) +') y-y\' : '+ str(round(molecule_experiment,2)) + '-' + str(round(molecule_prediction,2))
 
@@ -538,11 +556,11 @@ def weighted_highlight_known(smiles, atom_list, atom_predictions, molecule_predi
     fig.axes[0].set_title(note)
     sio = StringIO()
     fig.savefig(sio, format="svg", bbox_inches='tight')
-    svg = sio.getvalue()   
+    svg = sio.getvalue()
     return svg
 
 def moltosvg_interaction_known(mol, atom_list, atom_predictions, molecule_prediction, molecule_experiment, max_atom_pred, min_atom_pred, Number):
-    
+
     note = '('+ str(Number) +') y-y\' : '+ str(round(molecule_experiment,2)) + '-' + str(round(molecule_prediction,2))
     norm = matplotlib.colors.Normalize(vmin=min_atom_pred*0.9,vmax=max_atom_pred*1.1)
     cmap = cm.get_cmap('gray_r')
@@ -551,7 +569,7 @@ def moltosvg_interaction_known(mol, atom_list, atom_predictions, molecule_predic
 
     atom_colors = {}
     for i,atom in enumerate(atom_list):
-        atom_colors[atom] = plt_colors.to_rgba(atom_predictions[i])          
+        atom_colors[atom] = plt_colors.to_rgba(atom_predictions[i])
     rdDepictor.Compute2DCoords(mol)
 
     drawer = rdMolDraw2D.MolDraw2DSVG(280,218)
