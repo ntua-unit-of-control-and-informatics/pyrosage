@@ -1,7 +1,8 @@
 numpy
 torch
+torch-geometric
 rdkit
 pandas
 matplotlib
 pytdc
-
+imblearn
