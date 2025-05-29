@@ -518,13 +518,12 @@ if __name__ == "__main__":
 
             # Save model checkpoint with configuration name
             model_path = f"../models/{model_name}_attentivefp_{config['name']}.pt"
-            torch.save(
-                {
-                    'hyperparams': config,
-                    'train_metrics': metrics,
-                },
-                model_path
-            )
+            # When saving:
+            save_dict = {
+                'hyperparameters': {k: (float(v) if isinstance(v, np.number) else v) for k, v in config.items()},
+                'metrics': {k: (float(v) if isinstance(v, np.number) else v) for k, v in metrics.items()},
+            }
+            torch.save(save_dict, model_path)
 
             if metrics:
                 results.append(
