@@ -618,27 +618,75 @@ if __name__ == "__main__":
                 }
             )
 
-    # Create and save summary table
+    # At the end of the file, after processing all datasets
     if all_results:
         results_df = pd.DataFrame(all_results)
         print("\n=== Summary of Results ===")
         print(results_df)
-
+        
         # Save summary to CSV
         results_df.to_csv("../models/classification_results_summary.csv", index=False)
-
+        
+        # For each dataset, find the best model (only one configuration in this case)
+        for dataset in results_df['dataset'].unique():
+            dataset_row = results_df[results_df['dataset'] == dataset].iloc[0]
+            
+            # Use F1 score as the primary metric for classification
+            best_f1 = dataset_row['f1']
+            best_accuracy = dataset_row['accuracy']
+            best_auc = dataset_row['auc']
+            
+            # Get the hyperparameters (same for all datasets in this case)
+            best_hyperparams = hyperparameter_configs[0]
+            
+            # Save best model info to CSV
+            best_model_info = {
+                'metric': ['Dataset', 'Accuracy', 'F1 Score', 'AUC'] + list(best_hyperparams.keys()),
+                'value': [dataset, best_accuracy, best_f1, best_auc] + list(best_hyperparams.values())
+            }
+            best_model_df = pd.DataFrame(best_model_info)
+            
+            # Save to CSV
+            with open(f"../models/{dataset}_best_model_info.csv", 'w') as f:
+                f.write("=== Best Model ===\n")
+                best_model_df.to_csv(f, index=False)
+            
+            print(f"\n=== Best Model for {dataset} ===")
+            print(f"Accuracy: {best_accuracy:.4f}, F1 Score: {best_f1:.4f}, AUC: {best_auc:.4f}")
+        
         # Plot summary of metrics across datasets
         plt.figure(figsize=(15, 8))
-
+        
         metrics = ["accuracy", "precision", "recall", "f1", "auc"]
-
+        
         for i, metric in enumerate(metrics):
             plt.subplot(1, len(metrics), i + 1)
             sns.barplot(x="dataset", y=metric, data=results_df)
             plt.title(f"{metric.capitalize()}")
             plt.xticks(rotation=90)
             plt.ylim(0, 1)
-
+        
         plt.tight_layout()
         plt.savefig("../plots/classification_summary.png")
         plt.close()
+        
+        # Create a summary of best models
+        best_models_summary = []
+        for dataset in results_df['dataset'].unique():
+            dataset_row = results_df[results_df['dataset'] == dataset].iloc[0]
+            best_models_summary.append({
+                'dataset': dataset,
+                'accuracy': dataset_row['accuracy'],
+                'f1': dataset_row['f1'],
+                'auc': dataset_row['auc'],
+                'model': 'AttentiveFP',
+                'hidden_channels': best_hyperparams['hidden_channels'],
+                'num_layers': best_hyperparams['num_layers'],
+                'num_timesteps': best_hyperparams['num_timesteps'],
+                'learning_rate': best_hyperparams['learning_rate']
+            })
+        
+        best_models_df = pd.DataFrame(best_models_summary)
+        best_models_df.to_csv("../models/classification_best_models_summary.csv", index=False)
+        print("\n=== Best Models Summary ===")
+        print(best_models_df)
