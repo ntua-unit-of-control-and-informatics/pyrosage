@@ -515,6 +515,18 @@ if __name__ == "__main__":
             for config in hyperparameter_configs:
                 print(f"\n=== Training with configuration: {config['name']} ===")
                 metrics = train_and_evaluate(model_name, config)
+                
+                # Save model checkpoint with configuration name
+                model_path = f"../models/{model_name}_attentivefp_{config['name']}.pt"
+                torch.save(
+                    {
+                        'model_state_dict': metrics.state_dict(),
+                        'hyperparams': config,
+                        'train_metrics': metrics,
+                    },
+                    model_path
+                )
+                
                 if metrics:
                     results.append(
                         {
@@ -554,5 +566,52 @@ if __name__ == "__main__":
                 plt.tight_layout()
                 plt.savefig(f"../plots/{model_name}_hyperparameter_comparison.png")
                 plt.show()
+                
+                # After all hyperparameter configurations are evaluated
+                if results:
+                    results_df = pd.DataFrame(results)
+                    
+                    # Find the best model based on R² score (higher is better)
+                    best_model_idx = results_df['r2'].idxmax()
+                    best_config_name = results_df.loc[best_model_idx, 'config_name']
+                    best_rmse = results_df.loc[best_model_idx, 'rmse']
+                    best_mae = results_df.loc[best_model_idx, 'mae']
+                    best_r2 = results_df.loc[best_model_idx, 'r2']
+                    
+                    # Find the corresponding hyperparameters
+                    best_hyperparams = None
+                    for config in hyperparameter_configs:
+                        if config['name'] == best_config_name:
+                            best_hyperparams = config
+                            break
+                    
+                    # Add best model information
+                    print("\n=== Best Model ===")
+                    print(f"Configuration: {best_config_name}")
+                    print(f"RMSE: {best_rmse:.4f}, MAE: {best_mae:.4f}, R²: {best_r2:.4f}")
+                    print("Hyperparameters:")
+                    for key, value in best_hyperparams.items():
+                        if key != 'name':
+                            print(f"  {key}: {value}")
+                    
+                    # Save best model info to CSV
+                    best_model_info = {
+                        'metric': ['Best Configuration', 'RMSE', 'MAE', 'R²'] + list(best_hyperparams.keys()),
+                        'value': [best_config_name, best_rmse, best_mae, best_r2] + list(best_hyperparams.values())
+                    }
+                    best_model_df = pd.DataFrame(best_model_info)
+                    
+                    # Combine results with best model info
+                    with open(f"../models/{model_name}_hyperparameter_results.csv", 'w') as f:
+                        f.write("=== Hyperparameter Comparison ===\n")
+                        results_df.to_csv(f, index=False)
+                        f.write("\n=== Best Model ===\n")
+                        best_model_df.to_csv(f, index=False)
+                    
+                    # Save best model separately for easy access
+                    best_model_path = f"../models/{model_name}_attentivefp_best.pt"
+                    best_model_checkpoint = torch.load(f"../models/{model_name}_attentivefp_{best_config_name}.pt")
+                    torch.save(best_model_checkpoint, best_model_path)
+                    print(f"Best model saved to {best_model_path}")
         except Exception as e:
             print(f"Failed to train {model_name}: {e}")
