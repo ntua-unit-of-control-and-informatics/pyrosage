@@ -21,7 +21,7 @@ from torch_geometric.nn import AttentiveFP
 RDLogger.DisableLog('rdApp.*')
 
 # === Settings ===
-DATA_DIR = "../data"
+DATA_DIR = "../data/classification"
 MODEL_DIR = "../models"
 BATCH_SIZE = 32
 EPOCHS = 30
@@ -177,8 +177,7 @@ def train_model(model_name):
 
 # === Run for all your classification datasets ===
 if __name__ == "__main__":
-    datasets_path = "../data/classification"
-    all_datasets = [f for f in listdir(datasets_path) if isfile(join(datasets_path, f))]
+    all_datasets = [f for f in listdir(DATA_DIR) if isfile(join(DATA_DIR, f))]
     for dataset_name in all_datasets:
         filename = Path(dataset_name)
         model_name = filename.name.removesuffix("".join(filename.suffixes))
