@@ -16,7 +16,7 @@ from torch_geometric.nn import AttentiveFP
 RDLogger.DisableLog('rdApp.*')
 
 # === Settings ===
-DATA_DIR = "../data"
+DATA_DIR = "../data/regression"
 MODEL_DIR = "../models"
 BATCH_SIZE = 32
 EPOCHS = 30
@@ -24,7 +24,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class MoleculeDataset(torch.utils.data.Dataset):
-    def __init__(self, df, smiles_col='smiles', target_col='value'):
+    def __init__(self, df, smiles_col='smiles', target_col='active'):
         self.data_list = []
         for _, row in df.iterrows():
             mol = Chem.MolFromSmiles(row[smiles_col])
@@ -135,8 +135,7 @@ def train_model(model_name):
 
 # === Run for all your regression datasets ===
 if __name__ == "__main__":
-    datasets_path = "../data/regression"
-    all_datasets = [f for f in os.listdir(datasets_path) if isfile(join(datasets_path, f))]
+    all_datasets = [f for f in os.listdir(DATA_DIR) if isfile(join(DATA_DIR, f))]
     for dataset_name in all_datasets:
         filename = Path(dataset_name)
         model_name = filename.name.removesuffix("".join(filename.suffixes))
