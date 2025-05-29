@@ -330,19 +330,30 @@ def train_and_evaluate(model_name, hyperparams):
     # Load data
     df = pd.read_csv(f"../data/classification/{model_name}.csv")
     print(f"Dataset shape: {df.shape}")
+    
+    # Add this function to your code
+    def check_needs_balancing(df, target_col='active', min_acceptable_ratio=0.3):
+        """
+        Check if the dataset needs balancing based on class distribution
+        Returns True if imbalance is beyond acceptable range (0.3-0.7)
+        """
+        class_counts = df[target_col].value_counts(normalize=True)
+        min_class_ratio = class_counts.min()
+        
+        return min_class_ratio < min_acceptable_ratio
+
+    # Then in your training function, modify the SMOTE application section:
+
+    # Original class distribution check and visualization code
     print(f"Original class distribution:")
     class_dist = df['active'].value_counts(normalize=True)
     print(class_dist)
-    
-    # Visualize original class distribution
-    plt.figure(figsize=(8, 6))
-    sns.countplot(x='active', data=df)
-    plt.title(f'Original Class Distribution - {model_name}')
-    plt.savefig(f"../plots/{model_name}_original_class_dist.png")
-    plt.close()
-    
-    # Generate fingerprints for SMOTE
-    print("\nGenerating molecular fingerprints for SMOTE...")
+
+    # Check if balancing is needed
+    needs_balancing = check_needs_balancing(df, min_acceptable_ratio=0.3)
+
+    # Generate fingerprints for SMOTE (keep this part as it's useful regardless)
+    print("\nGenerating molecular fingerprints...")
     fingerprints = []
     valid_indices = []
     for idx, smiles in enumerate(df['smiles']):
@@ -351,52 +362,59 @@ def train_and_evaluate(model_name, hyperparams):
             fingerprints.append(fp)
             valid_indices.append(idx)
 
-    # Create feature matrix and target vector for SMOTE
+    # Create feature matrix and target vector
     X = np.array(fingerprints)
     y = df['active'].iloc[valid_indices].values
 
-    # Apply SMOTE
-    print("Applying SMOTE for class balancing...")
-    smote = SMOTE(random_state=42)
-    X_resampled, y_resampled = smote.fit_resample(X, y)
-    print(f"Original dataset shape: {X.shape}, Resampled shape: {X_resampled.shape}")
+    # Only apply SMOTE if balance is outside acceptable range
+    if needs_balancing:
+        print(f"Class imbalance detected (min ratio: {class_dist.min():.4f}). Applying SMOTE...")
+        
+        # Apply SMOTE
+        smote = SMOTE(random_state=42)
+        X_resampled, y_resampled = smote.fit_resample(X, y)
+        print(f"Original dataset shape: {X.shape}, Resampled shape: {X_resampled.shape}")
 
-    # Create new balanced dataframe
-    original_smiles = df['smiles'].iloc[valid_indices].values
-    smiles_dict = dict(zip(map(tuple, X), original_smiles))
+        # Create new balanced dataframe with SMOTE samples
+        original_smiles = df['smiles'].iloc[valid_indices].values
+        smiles_dict = dict(zip(map(tuple, X), original_smiles))
 
-    # Get SMILES for both original and synthetic samples
-    resampled_smiles = []
-    for fp in X_resampled:
-        fp_tuple = tuple(fp)
-        if fp_tuple in smiles_dict:
-            # Original molecule
-            resampled_smiles.append(smiles_dict[fp_tuple])
-        else:
-            # Find nearest neighbor among original molecules
-            distances = np.linalg.norm(X - fp, axis=1)
-            nearest_idx = np.argmin(distances)
-            resampled_smiles.append(original_smiles[nearest_idx])
+        # Get SMILES for both original and synthetic samples
+        resampled_smiles = []
+        for fp in X_resampled:
+            fp_tuple = tuple(fp)
+            if fp_tuple in smiles_dict:
+                # Original molecule
+                resampled_smiles.append(smiles_dict[fp_tuple])
+            else:
+                # Find nearest neighbor among original molecules
+                distances = np.linalg.norm(X - fp, axis=1)
+                nearest_idx = np.argmin(distances)
+                resampled_smiles.append(original_smiles[nearest_idx])
 
-    # Create balanced dataframe
-    balanced_df = pd.DataFrame({
-        'smiles': resampled_smiles,
-        'active': y_resampled
-    })
+        # Create balanced dataframe
+        working_df = pd.DataFrame({
+            'smiles': resampled_smiles,
+            'active': y_resampled
+        })
 
-    # Print and visualize balanced class distribution
-    print("\nBalanced class distribution:")
-    balanced_dist = balanced_df['active'].value_counts(normalize=True)
-    print(balanced_dist)
-    
-    plt.figure(figsize=(8, 6))
-    sns.countplot(x='active', data=balanced_df)
-    plt.title(f'Balanced Class Distribution After SMOTE - {model_name}')
-    plt.savefig(f"../plots/{model_name}_balanced_class_dist.png")
-    plt.close()
+        # Print and visualize balanced class distribution
+        print("\nBalanced class distribution:")
+        balanced_dist = working_df['active'].value_counts(normalize=True)
+        print(balanced_dist)
+        
+        plt.figure(figsize=(8, 6))
+        sns.countplot(x='active', data=working_df)
+        plt.title(f'Balanced Class Distribution After SMOTE - {model_name}')
+        plt.savefig(f"../plots/{model_name}_balanced_class_dist.png")
+        plt.close()
+    else:
+        print(f"Class distribution is acceptable (min ratio: {class_dist.min():.4f}). Skipping SMOTE.")
+        # Use the original data with valid molecules only
+        working_df = df.iloc[valid_indices].copy()
 
-    # Split balanced data
-    train_df, test_df = train_test_split(balanced_df, test_size=0.2, random_state=42, stratify=balanced_df['active'])
+    # Continue with data splitting using working_df instead of original df or balanced_df
+    train_df, test_df = train_test_split(working_df, test_size=0.2, random_state=42, stratify=working_df['active'])
     train_df, val_df = train_test_split(train_df, test_size=0.2, random_state=42, stratify=train_df['active'])
 
     print(f"\nTrain set: {len(train_df)}, Validation set: {len(val_df)}, Test set: {len(test_df)}")
