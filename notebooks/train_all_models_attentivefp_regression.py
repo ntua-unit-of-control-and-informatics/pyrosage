@@ -520,7 +520,6 @@ if __name__ == "__main__":
             model_path = f"../models/{model_name}_attentivefp_{config['name']}.pt"
             torch.save(
                 {
-                    'model_state_dict': model.state_dict(),
                     'hyperparams': config,
                     'train_metrics': metrics,
                 },
