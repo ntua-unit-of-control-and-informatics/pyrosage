@@ -40,12 +40,12 @@ def plot_scatter(y_true, y_pred, title='Predicted vs Actual'):
     """Plot scatter plot of predicted vs actual values"""
     plt.figure(figsize=(8, 8))
     plt.scatter(y_true, y_pred, alpha=0.5)
-    
+
     # Add perfect prediction line
     min_val = min(min(y_true), min(y_pred))
     max_val = max(max(y_true), max(y_pred))
     plt.plot([min_val, max_val], [min_val, max_val], 'r--')
-    
+
     plt.xlabel('Actual Values')
     plt.ylabel('Predicted Values')
     plt.title(title)
@@ -65,7 +65,7 @@ def plot_residuals(y_true, y_pred, title='Residuals Plot'):
 def plot_training_history(history, title='Training History'):
     """Plot training and validation metrics over epochs"""
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    
+
     # Loss
     axes[0, 0].plot(history['train_loss'], label='Train')
     axes[0, 0].plot(history['val_loss'], label='Validation')
@@ -74,7 +74,7 @@ def plot_training_history(history, title='Training History'):
     axes[0, 0].set_xlabel('Epoch')
     axes[0, 0].set_ylabel('Loss')
     axes[0, 0].legend()
-    
+
     # MAE
     axes[0, 1].plot(history['train_mae'], label='Train')
     axes[0, 1].plot(history['val_mae'], label='Validation')
@@ -83,7 +83,7 @@ def plot_training_history(history, title='Training History'):
     axes[0, 1].set_xlabel('Epoch')
     axes[0, 1].set_ylabel('MAE')
     axes[0, 1].legend()
-    
+
     # RMSE
     axes[1, 0].plot(history['train_rmse'], label='Train')
     axes[1, 0].plot(history['val_rmse'], label='Validation')
@@ -92,7 +92,7 @@ def plot_training_history(history, title='Training History'):
     axes[1, 0].set_xlabel('Epoch')
     axes[1, 0].set_ylabel('RMSE')
     axes[1, 0].legend()
-    
+
     # R²
     axes[1, 1].plot(history['train_r2'], label='Train')
     axes[1, 1].plot(history['val_r2'], label='Validation')
@@ -101,7 +101,7 @@ def plot_training_history(history, title='Training History'):
     axes[1, 1].set_xlabel('Epoch')
     axes[1, 1].set_ylabel('R²')
     axes[1, 1].legend()
-    
+
     plt.suptitle(title)
     plt.tight_layout()
     return plt
@@ -115,7 +115,7 @@ class EarlyStopping:
         self.best_loss = float('inf')
         self.early_stop = False
         self.best_state_dict = None
-        
+
     def __call__(self, val_loss, model):
         if val_loss < self.best_loss - self.min_delta:
             self.best_loss = val_loss
@@ -134,14 +134,14 @@ class MoleculeDataset(Dataset):
         self.smiles_col = smiles_col
         self.target_col = target_col
         self.data_list = self._prepare_data()
-        
+
     def _prepare_data(self):
         data_list = []
         for idx, row in self.df.iterrows():
             mol = Chem.MolFromSmiles(row[self.smiles_col])
             if mol is None:
                 continue
-                
+
             # Enhanced atom features
             atom_features = []
             for atom in mol.GetAtoms():
@@ -159,9 +159,9 @@ class MoleculeDataset(Dataset):
                     int(atom.GetHybridization() == Chem.rdchem.HybridizationType.SP3)
                 ]
                 atom_features.append(features)
-                
+
             x = torch.tensor(atom_features, dtype=torch.float)
-            
+
             # Enhanced bond features
             edges_list = []
             edge_features = []
@@ -169,7 +169,7 @@ class MoleculeDataset(Dataset):
                 i = bond.GetBeginAtomIdx()
                 j = bond.GetEndAtomIdx()
                 edges_list.extend([[i, j], [j, i]])
-                
+
                 features = [
                     # Bond type as one-hot
                     int(bond.GetBondType() == Chem.rdchem.BondType.SINGLE),
@@ -181,13 +181,13 @@ class MoleculeDataset(Dataset):
                     int(bond.IsInRing())
                 ]
                 edge_features.extend([features, features])
-                
+
             if not edges_list:  # Skip molecules with no bonds
                 continue
-                
+
             edge_index = torch.tensor(edges_list, dtype=torch.long).t()
             edge_attr = torch.tensor(edge_features, dtype=torch.float)
-            
+
             # Create PyG Data object - note target is now a float for regression
             data = Data(
                 x=x,
@@ -200,7 +200,7 @@ class MoleculeDataset(Dataset):
 
     def len(self):
         return len(self.data_list)
-    
+
     def get(self, idx):
         return self.data_list[idx]
 
@@ -210,36 +210,36 @@ def train_epoch(model, loader, optimizer, criterion, device, scheduler=None):
     total_loss = 0
     all_predictions = []
     all_targets = []
-    
+
     for batch in loader:
         batch = batch.to(device)
         optimizer.zero_grad()
-        
+
         out = model(batch.x, batch.edge_index, batch.edge_attr, batch=batch.batch)
         out = out.squeeze()
         target = batch.y.squeeze()
-        
+
         loss = criterion(out, target)
         loss.backward()
-        
+
         # Gradient clipping
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        
+
         optimizer.step()
         if scheduler is not None:
             scheduler.step()
-        
+
         # Store predictions and targets
         with torch.no_grad():
             all_predictions.extend(out.cpu().numpy())
             all_targets.extend(target.cpu().numpy())
-        
+
         total_loss += loss.item() * batch.num_graphs
-    
+
     epoch_loss = total_loss / len(loader.dataset)
     all_predictions = np.array(all_predictions)
     all_targets = np.array(all_targets)
-    
+
     # Calculate regression metrics
     metrics = {
         'loss': epoch_loss,
@@ -247,7 +247,7 @@ def train_epoch(model, loader, optimizer, criterion, device, scheduler=None):
         'rmse': np.sqrt(mean_squared_error(all_targets, all_predictions)),
         'r2': r2_score(all_targets, all_predictions)
     }
-    
+
     return metrics, all_predictions, all_targets
 
 def evaluate(model, loader, criterion, device):
@@ -256,7 +256,7 @@ def evaluate(model, loader, criterion, device):
     total_loss = 0
     all_predictions = []
     all_targets = []
-    
+
     with torch.no_grad():
         for batch in loader:
             batch = batch.to(device)
@@ -267,17 +267,17 @@ def evaluate(model, loader, criterion, device):
             out = out.squeeze()
             target = batch.y.squeeze()
             loss = criterion(out, target)
-            
+
             # Store predictions and targets
             all_predictions.extend(out.cpu().numpy())
             all_targets.extend(target.cpu().numpy())
-            
+
             total_loss += loss.item() * batch.num_graphs
-    
+
     epoch_loss = total_loss / len(loader.dataset)
     all_predictions = np.array(all_predictions)
     all_targets = np.array(all_targets)
-    
+
     # Calculate regression metrics
     metrics = {
         'loss': epoch_loss,
@@ -285,7 +285,7 @@ def evaluate(model, loader, criterion, device):
         'rmse': np.sqrt(mean_squared_error(all_targets, all_predictions)),
         'r2': r2_score(all_targets, all_predictions)
     }
-    
+
     return metrics, all_predictions, all_targets
 
 def train_and_evaluate(model_name, hyperparams):
@@ -454,6 +454,7 @@ def train_and_evaluate(model_name, hyperparams):
     # 1. Training history
     fig = plot_training_history(history, title=f"Training History - {model_name}")
     fig.savefig(f"../plots/{model_name}_training_history.png")
+    plt.close()
 
     # 2. Scatter plot of predicted vs actual (test set)
     fig = plot_scatter(
@@ -462,6 +463,7 @@ def train_and_evaluate(model_name, hyperparams):
         title=f"Predicted vs Actual (Test) - {model_name}",
     )
     fig.savefig(f"../plots/{model_name}_scatter_plot.png")
+    plt.close()
 
     # 3. Residuals plot
     fig = plot_residuals(
@@ -470,9 +472,7 @@ def train_and_evaluate(model_name, hyperparams):
         title=f"Residuals Plot (Test) - {model_name}",
     )
     fig.savefig(f"../plots/{model_name}_residuals.png")
-
-    # Close all plot windows
-    plt.close("all")
+    plt.close()
 
     # Return metrics and the trained model (not saving it yet)
     return final_test_metrics, model
@@ -558,11 +558,6 @@ if __name__ == "__main__":
             results_df = pd.DataFrame(results)
             print(results_df)
 
-            # Save results to CSV
-            results_df.to_csv(
-                f"../models/{model_name}_hyperparameter_results.csv", index=False
-            )
-
             # Plot comparison
             plt.figure(figsize=(15, 5))
 
@@ -580,7 +575,7 @@ if __name__ == "__main__":
 
             plt.tight_layout()
             plt.savefig(f"../plots/{model_name}_hyperparameter_comparison.png")
-            plt.show()
+            plt.close()
 
             # If we found a best model
             if best_model is not None and best_config is not None:
@@ -601,24 +596,6 @@ if __name__ == "__main__":
                 for key, value in best_config.items():
                     if key != "name":
                         print(f"  {key}: {value}")
-
-                # Save best model info to CSV
-                best_model_info = {
-                    "metric": ["Best Configuration", "RMSE", "MAE", "R²"]
-                    + list(best_config.keys()),
-                    "value": [best_config_name, best_rmse, best_mae, best_r2]
-                    + list(best_config.values()),
-                }
-                best_model_df = pd.DataFrame(best_model_info)
-
-                # Combine results with best model info
-                with open(
-                    f"../models/{model_name}_hyperparameter_results.csv", "w"
-                ) as f:
-                    f.write("=== Hyperparameter Comparison ===\n")
-                    results_df.to_csv(f, index=False)
-                    f.write("\n=== Best Model ===\n")
-                    best_model_df.to_csv(f, index=False)
 
                 # Save only the best model with its hyperparameters
                 best_model_path = f"../models/{model_name}_attentivefp_best.pt"
