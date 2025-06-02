@@ -361,8 +361,7 @@ def train_and_evaluate(model_name, hyperparams):
         is_imbalanced = imbalance_ratio > 2.0
         print(f"Class imbalance ratio: {imbalance_ratio:.2f} - {'Imbalanced' if is_imbalanced else 'Balanced'}")
 
-    # Apply SMOTE only if dataset is imbalanced and use_smote is enabled
-    if is_imbalanced and hyperparams.get('use_smote', False):
+    if is_imbalanced:
         print("Applying SMOTE to balance training data...")
         # Extract smiles and labels
         X_smiles = train_df['smiles'].values
