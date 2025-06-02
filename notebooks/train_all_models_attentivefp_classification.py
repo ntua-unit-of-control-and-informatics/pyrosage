@@ -166,6 +166,7 @@ def generate_morgan_fingerprints(smiles):
 
 class MoleculeDataset(Dataset):
     def __init__(self, df, smiles_col, target_col):
+        super().__init__()
         self.df = df
         self.smiles_col = smiles_col
         self.target_col = target_col
