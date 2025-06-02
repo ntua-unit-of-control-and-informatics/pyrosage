@@ -170,9 +170,8 @@ class MoleculeDataset(Dataset):
         self.df = df
         self.smiles_col = smiles_col
         self.target_col = target_col
-        self.data_list = []
-        self._prepare_data()
-        
+        self.data_list = self._prepare_data()
+
     # Add this method to fix the error
     def __len__(self):
         return len(self.data_list)
@@ -243,7 +242,7 @@ class MoleculeDataset(Dataset):
         if skipped_no_bonds > 0:
             print(f"Skipped {skipped_no_bonds} molecules with no bonds")
 
-        self.data_list = data_list
+        return data_list
 
 def train_epoch(model, loader, optimizer, criterion, device, scheduler=None):
     """Train model for one epoch"""
