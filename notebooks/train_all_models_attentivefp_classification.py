@@ -351,73 +351,22 @@ def train_and_evaluate(model_name, hyperparams):
     print(f"Class distribution in val: {val_df['active'].value_counts()}")
     print(f"Class distribution in test: {test_df['active'].value_counts()}")
 
-    # Check if dataset is imbalanced (use threshold of 2:1 ratio)
+    # Calculate class weights for imbalanced datasets
     class_counts = train_df['active'].value_counts()
-    is_imbalanced = False
     if len(class_counts) >= 2:
         majority_count = class_counts.max()
         minority_count = class_counts.min()
         imbalance_ratio = majority_count / minority_count
         is_imbalanced = imbalance_ratio > 2.0
         print(f"Class imbalance ratio: {imbalance_ratio:.2f} - {'Imbalanced' if is_imbalanced else 'Balanced'}")
-
-    # Apply SMOTE if dataset is imbalanced
-    if is_imbalanced:
-        print("Applying SMOTE to balance training data...")
-        try:
-            # Generate fingerprints for SMOTE
-            valid_indices = []
-            fingerprints = []
-            
-            for idx, row in train_df.iterrows():
-                fp = generate_morgan_fingerprints(row['smiles'])
-                if fp is not None:
-                    fingerprints.append(fp)
-                    valid_indices.append(idx)
-            
-            if not fingerprints:
-                print("Warning: Could not generate valid fingerprints for SMOTE")
-            else:
-                # Get corresponding labels
-                y = train_df.loc[valid_indices, 'active'].values
-                X = np.array(fingerprints)
-                
-                # Apply SMOTE
-                smote = SMOTE(random_state=42)
-                X_resampled, y_resampled = smote.fit_resample(X, y)
-                
-                # Create new dataframe with original valid samples for reference
-                valid_train_df = train_df.loc[valid_indices].copy()
-                
-                # Create dictionary to map fingerprints back to SMILES
-                fp_to_smiles = {tuple(fp): smiles for fp, smiles in 
-                              zip(fingerprints, valid_train_df['smiles'])}
-                
-                # Reconstruct balanced dataset
-                new_smiles = []
-                for fp in X_resampled:
-                    fp_tuple = tuple(fp)
-                    if fp_tuple in fp_to_smiles:
-                        # Original molecule
-                        new_smiles.append(fp_to_smiles[fp_tuple])
-                    else:
-                        # Synthetic sample from SMOTE - use the first valid SMILES as a placeholder
-                        # This is a simplification - ideally we'd convert the fingerprint back to a valid SMILES
-                        new_smiles.append(valid_train_df['smiles'].iloc[0])
-                
-                # Create new balanced dataframe
-                train_df = pd.DataFrame({
-                    'smiles': new_smiles,
-                    'active': y_resampled
-                })
-                
-                print("Applied SMOTE - New training distribution:")
-                print(train_df['active'].value_counts())
-        except Exception as e:
-            print(f"Error applying SMOTE: {e}")
-            print("Using original dataset instead")
+        
+        # Calculate weight for the positive class (assuming 1 is the minority)
+        pos_weight = torch.tensor([imbalance_ratio], device=device)
+        print(f"Using positive class weight: {imbalance_ratio:.2f}")
     else:
-        print("Dataset is balanced - SMOTE not needed")
+        is_imbalanced = False
+        pos_weight = torch.tensor([1.0], device=device)
+        print("Using equal class weights")
 
     # Create datasets and dataloaders
     train_dataset = MoleculeDataset(train_df)
@@ -460,9 +409,8 @@ def train_and_evaluate(model_name, hyperparams):
         weight_decay=hyperparams['weight_decay']
     )
     
-    # Loss function - BCEWithLogitsLoss for binary classification
-    # This combines Sigmoid and BCELoss in one function for numerical stability
-    criterion = nn.BCEWithLogitsLoss()
+    # Loss function - weighted BCEWithLogitsLoss for imbalanced binary classification
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
     # Learning rate scheduler
     num_training_steps = hyperparams['epochs'] * len(train_loader)
