@@ -328,96 +328,28 @@ def train_and_evaluate(model_name, hyperparams):
     print(f"Hyperparameters: {hyperparams}")
     
     # Load data
-    df = pd.read_csv(f"../data/classification/{model_name}.csv")
+    df = pd.read_csv(f"{DATA_DIR}/{model_name}.csv")
     print(f"Dataset shape: {df.shape}")
     
-    # Add this function to your code
-    def check_needs_balancing(df, target_col='active', min_acceptable_ratio=0.3):
-        """
-        Check if the dataset needs balancing based on class distribution
-        Returns True if imbalance is beyond acceptable range (0.3-0.7)
-        """
-        class_counts = df[target_col].value_counts(normalize=True)
-        min_class_ratio = class_counts.min()
-        
-        return min_class_ratio < min_acceptable_ratio
+    # Show target distribution
+    print("Target value statistics:")
+    print(df['active'].value_counts())
+    
+    # Plot target distribution
+    plt.figure(figsize=(10, 6))
+    sns.countplot(x='active', data=df)
+    plt.title(f'Distribution of Target Classes - {model_name}')
+    plt.savefig(f"../plots/{model_name}_target_distribution.png")
+    plt.close()
 
-    # Then in your training function, modify the SMOTE application section:
-
-    # Original class distribution check and visualization code
-    print(f"Original class distribution:")
-    class_dist = df['active'].value_counts(normalize=True)
-    print(class_dist)
-
-    # Check if balancing is needed
-    needs_balancing = check_needs_balancing(df, min_acceptable_ratio=0.3)
-
-    # Generate fingerprints for SMOTE (keep this part as it's useful regardless)
-    print("\nGenerating molecular fingerprints...")
-    fingerprints = []
-    valid_indices = []
-    for idx, smiles in enumerate(df['smiles']):
-        fp = generate_morgan_fingerprints(smiles)
-        if fp is not None:
-            fingerprints.append(fp)
-            valid_indices.append(idx)
-
-    # Create feature matrix and target vector
-    X = np.array(fingerprints)
-    y = df['active'].iloc[valid_indices].values
-
-    # Only apply SMOTE if balance is outside acceptable range
-    if needs_balancing:
-        print(f"Class imbalance detected (min ratio: {class_dist.min():.4f}). Applying SMOTE...")
-        
-        # Apply SMOTE
-        smote = SMOTE(random_state=42)
-        X_resampled, y_resampled = smote.fit_resample(X, y)
-        print(f"Original dataset shape: {X.shape}, Resampled shape: {X_resampled.shape}")
-
-        # Create new balanced dataframe with SMOTE samples
-        original_smiles = df['smiles'].iloc[valid_indices].values
-        smiles_dict = dict(zip(map(tuple, X), original_smiles))
-
-        # Get SMILES for both original and synthetic samples
-        resampled_smiles = []
-        for fp in X_resampled:
-            fp_tuple = tuple(fp)
-            if fp_tuple in smiles_dict:
-                # Original molecule
-                resampled_smiles.append(smiles_dict[fp_tuple])
-            else:
-                # Find nearest neighbor among original molecules
-                distances = np.linalg.norm(X - fp, axis=1)
-                nearest_idx = np.argmin(distances)
-                resampled_smiles.append(original_smiles[nearest_idx])
-
-        # Create balanced dataframe
-        working_df = pd.DataFrame({
-            'smiles': resampled_smiles,
-            'active': y_resampled
-        })
-
-        # Print and visualize balanced class distribution
-        print("\nBalanced class distribution:")
-        balanced_dist = working_df['active'].value_counts(normalize=True)
-        print(balanced_dist)
-        
-        plt.figure(figsize=(8, 6))
-        sns.countplot(x='active', data=working_df)
-        plt.title(f'Balanced Class Distribution After SMOTE - {model_name}')
-        plt.savefig(f"../plots/{model_name}_balanced_class_dist.png")
-        plt.close()
-    else:
-        print(f"Class distribution is acceptable (min ratio: {class_dist.min():.4f}). Skipping SMOTE.")
-        # Use the original data with valid molecules only
-        working_df = df.iloc[valid_indices].copy()
-
-    # Continue with data splitting using working_df instead of original df or balanced_df
-    train_df, test_df = train_test_split(working_df, test_size=0.2, random_state=42, stratify=working_df['active'])
+    # Split data with stratification to maintain class balance
+    train_df, test_df = train_test_split(df, test_size=0.2, random_state=42, stratify=df['active'])
     train_df, val_df = train_test_split(train_df, test_size=0.2, random_state=42, stratify=train_df['active'])
 
-    print(f"\nTrain set: {len(train_df)}, Validation set: {len(val_df)}, Test set: {len(test_df)}")
+    print(f"Train set: {len(train_df)}, Validation set: {len(val_df)}, Test set: {len(test_df)}")
+    print(f"Class distribution in train: {train_df['active'].value_counts()}")
+    print(f"Class distribution in val: {val_df['active'].value_counts()}")
+    print(f"Class distribution in test: {test_df['active'].value_counts()}")
 
     # Create datasets and dataloaders
     train_dataset = MoleculeDataset(train_df)
@@ -431,14 +363,15 @@ def train_and_evaluate(model_name, hyperparams):
     # Check if any dataloaders are empty
     if len(train_dataset) == 0 or len(val_dataset) == 0 or len(test_dataset) == 0:
         print("Error: One or more datasets are empty!")
-        return None
+        return None, None
 
     # Create model
+    num_classes = df['active'].nunique()
     model = AttentiveFP(
-        in_channels=10,  # Updated for enhanced atom features
+        in_channels=10,  # Enhanced atom features
         hidden_channels=hyperparams['hidden_channels'],
-        out_channels=1,  # 1 output for binary classification
-        edge_dim=6,  # Updated for enhanced bond features
+        out_channels=num_classes,  # Binary classification
+        edge_dim=6,  # Enhanced bond features
         num_layers=hyperparams['num_layers'],
         num_timesteps=hyperparams['num_timesteps'],
         dropout=hyperparams['dropout']
@@ -536,46 +469,27 @@ def train_and_evaluate(model_name, hyperparams):
     print("Val   -", ' '.join([f"{k}: {v:.4f}" for k, v in final_val_metrics.items()]))
     print("Test  -", ' '.join([f"{k}: {v:.4f}" for k, v in final_test_metrics.items()]))
     
-    # Classification report
-    print("\nClassification Report (Test Set):")
-    binary_preds = (final_test_preds > 0.5).astype(int)
-    print(classification_report(final_test_targets, binary_preds))
-    
     # Generate and save plots
     # 1. Training history
     fig = plot_training_history(history, title=f'Training History - {model_name}')
     fig.savefig(f"../plots/{model_name}_training_history.png")
+    plt.close()
     
-    # 2. ROC curve
-    fig = plot_roc_curve(final_test_targets, final_test_preds, title=f'ROC Curve (Test) - {model_name}')
-    fig.savefig(f"../plots/{model_name}_roc_curve.png")
-    
-    # 3. Precision-Recall curve
-    fig = plot_pr_curve(final_test_targets, final_test_preds, title=f'PR Curve (Test) - {model_name}')
-    fig.savefig(f"../plots/{model_name}_pr_curve.png")
-    
-    # 4. Confusion Matrix
-    fig = plot_confusion_matrix(final_test_targets, binary_preds, title=f'Confusion Matrix (Test) - {model_name}')
+    # 2. Confusion matrix (test set)
+    fig = plot_confusion_matrix(final_test_targets, final_test_preds, title=f'Confusion Matrix (Test) - {model_name}')
     fig.savefig(f"../plots/{model_name}_confusion_matrix.png")
+    plt.close()
     
-    # Save the model and results
-    save_path = f"../models/{model_name}_attentivefp.pt"
-    results = {
-        'model_state_dict': model.state_dict(),
-        'hyperparams': hyperparams,
-        'train_metrics': final_train_metrics,
-        'val_metrics': final_val_metrics,
-        'test_metrics': final_test_metrics,
-        'history': dict(history)
-    }
-    torch.save(results, save_path)
-    print(f"Model and results saved to {save_path}")
+    # 3. ROC curve (test set) if binary classification
+    if num_classes == 2:
+        fig = plot_roc_curve(final_test_targets, final_test_preds, title=f'ROC Curve (Test) - {model_name}')
+        fig.savefig(f"../plots/{model_name}_roc_curve.png")
+        plt.close()
     
     # Close all plot windows
     plt.close('all')
     
-    return final_test_metrics
-
+    return final_test_metrics, model
 # Define hyperparameter configurations to try
 hyperparameter_configs = [
     {
