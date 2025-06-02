@@ -123,21 +123,32 @@ def plot_training_history(history, title='Training History'):
     
     plt.suptitle(title)
     plt.tight_layout()
-    return plt
+    return fig  # Return the figure object, not plt
 
 class EarlyStopping:
     """Early stopping to prevent overfitting"""
-    def __init__(self, patience=10, min_delta=0):
+    def __init__(self, patience=10, min_delta=0, monitor='loss'):
         self.patience = patience
         self.min_delta = min_delta
         self.counter = 0
-        self.best_loss = float('inf')
+        self.best_score = float('inf') if monitor == 'loss' else float('-inf')
         self.early_stop = False
         self.best_state_dict = None
+        self.monitor = monitor
+        self.is_loss = monitor == 'loss'
         
-    def __call__(self, val_loss, model):
-        if val_loss < self.best_loss - self.min_delta:
-            self.best_loss = val_loss
+    def __call__(self, metrics, model):
+        current_score = metrics[self.monitor]
+        
+        if self.is_loss:
+            score = -current_score
+            delta = -self.min_delta
+        else:
+            score = current_score
+            delta = self.min_delta
+        
+        if score > self.best_score + delta:
+            self.best_score = score
             self.counter = 0
             self.best_state_dict = model.state_dict()
         else:
@@ -430,6 +441,14 @@ def train_and_evaluate(model_name, hyperparams):
     # Inside train_and_evaluate, before model instantiation
     print(f"DEBUG: Initializing AttentiveFP with in_channels=7, hidden_channels={hyperparams['hidden_channels']}, edge_dim=5")
     
+    # Use F1 score for early stopping in imbalanced datasets
+    if df['active'].value_counts(normalize=True).min() < 0.25:  # If minority class < 25%
+        early_stopping = EarlyStopping(patience=hyperparams['patience'], monitor='f1')
+        print("Using F1 score for early stopping due to class imbalance")
+    else:
+        early_stopping = EarlyStopping(patience=hyperparams['patience'], monitor='loss')
+        print("Using loss for early stopping")
+    
     model = AttentiveFP(
         in_channels=7,
         hidden_channels=hyperparams['hidden_channels'],
@@ -482,8 +501,6 @@ def train_and_evaluate(model_name, hyperparams):
         scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps)
 
 
-    # Early stopping
-    early_stopping = EarlyStopping(patience=hyperparams['patience'])
     
     # Training history
     history = defaultdict(list)
@@ -534,14 +551,14 @@ def train_and_evaluate(model_name, hyperparams):
         if len(val_loader)>0: print("Val   -", ' '.join([f"{k}: {v:.4f}" for k, v in val_metrics.items()]))
         if len(test_loader)>0: print("Test  -", ' '.join([f"{k}: {v:.4f}" for k, v in test_metrics.items()]))
         
-        # Early stopping check (use validation loss)
-        early_stopping(val_metrics['loss'], model) # val_metrics['loss'] could be nan
-        if early_stopping.early_stop:
-            print(f"Early stopping at epoch {epoch+1}")
-            # Load best model
-            if early_stopping.best_state_dict:
-                model.load_state_dict(early_stopping.best_state_dict)
-            break
+        # Early stopping check 
+        if len(val_loader) > 0:
+            early_stopping(val_metrics, model)  # Pass the whole metrics dict
+            if early_stopping.early_stop:
+                print(f"Early stopping at epoch {epoch+1}")
+                if early_stopping.best_state_dict:
+                    model.load_state_dict(early_stopping.best_state_dict)
+                break
     
     # Load best model for final evaluation
     if early_stopping.best_state_dict is not None:
@@ -682,22 +699,4 @@ if __name__ == "__main__":
             print(results_df)
 
             # Plot comparison
-            plt.figure(figsize=(15, 8))
-
-            plt.subplot(2, 2, 1)
-            sns.barplot(x="config_name", y="accuracy", data=results_df)
-            plt.title("Accuracy")
-
-            plt.subplot(2, 2, 2)
-            sns.barplot(x="config_name", y="precision", data=results_df)
-            plt.title("Precision")
-
-            plt.subplot(2, 2, 3)
-            sns.barplot(x="config_name", y="recall", data=results_df)
-            plt.title("Recall")
-
-            plt.subplot(2, 2, 4)
-            sns.barplot(x="config_name", y="f1", data=results_df)
-            plt.title("F1 Score")
-
-            plt.tight_layout()
+            plt.figure(figsize=(
