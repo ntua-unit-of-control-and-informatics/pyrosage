@@ -180,9 +180,9 @@ class MoleculeDataset(Dataset):
                     int(atom.GetIsAromatic()),
                     int(atom.IsInRing()),
                     # Hybridization as one-hot
-                    int(atom.GetHybridization() == Chem.rdchem.HybridizationType.SP),
-                    int(atom.GetHybridization() == Chem.rdchem.HybridizationType.SP2),
-                    int(atom.GetHybridization() == Chem.rdchem.HybridizationType.SP3)
+                    #int(atom.GetHybridization() == Chem.rdchem.HybridizationType.SP),
+                    #int(atom.GetHybridization() == Chem.rdchem.HybridizationType.SP2),
+                    #int(atom.GetHybridization() == Chem.rdchem.HybridizationType.SP3)
                 ]
                 atom_features.append(features)
                 
@@ -198,10 +198,10 @@ class MoleculeDataset(Dataset):
                 
                 features = [
                     # Bond type as one-hot
-                    int(bond.GetBondType() == Chem.rdchem.BondType.SINGLE),
-                    int(bond.GetBondType() == Chem.rdchem.BondType.DOUBLE),
-                    int(bond.GetBondType() == Chem.rdchem.BondType.TRIPLE),
-                    int(bond.GetBondType() == Chem.rdchem.BondType.AROMATIC),
+                    #int(bond.GetBondType() == Chem.rdchem.BondType.SINGLE),
+                    #int(bond.GetBondType() == Chem.rdchem.BondType.DOUBLE),
+                    #int(bond.GetBondType() == Chem.rdchem.BondType.TRIPLE),
+                    #int(bond.GetBondType() == Chem.rdchem.BondType.AROMATIC),
                     # Additional features
                     int(bond.GetIsConjugated()),
                     int(bond.IsInRing())
@@ -342,34 +342,75 @@ def train_and_evaluate(model_name, hyperparams):
     plt.savefig(f"../plots/{model_name}_target_distribution.png")
     plt.close()
 
-    # Split data with stratification to maintain class balance
-    train_df, test_df = train_test_split(df, test_size=0.2, random_state=42, stratify=df['active'])
-    train_df, val_df = train_test_split(train_df, test_size=0.2, random_state=42, stratify=train_df['active'])
+    # Split data with stratification to maintain class balance before SMOTE
+    # SMOTE should only be applied to the training set
+    original_train_df, test_df = train_test_split(df, test_size=0.2, random_state=42, stratify=df['active'])
+    original_train_df, val_df = train_test_split(original_train_df, test_size=0.2, random_state=42, stratify=original_train_df['active'])
 
-    print(f"Train set: {len(train_df)}, Validation set: {len(val_df)}, Test set: {len(test_df)}")
-    print(f"Class distribution in train: {train_df['active'].value_counts()}")
+    print(f"Original Train set: {len(original_train_df)}, Validation set: {len(val_df)}, Test set: {len(test_df)}")
+    print(f"Class distribution in original train: {original_train_df['active'].value_counts()}")
     print(f"Class distribution in val: {val_df['active'].value_counts()}")
     print(f"Class distribution in test: {test_df['active'].value_counts()}")
 
-    # Calculate class weights for imbalanced datasets
-    class_counts = train_df['active'].value_counts()
-    if len(class_counts) >= 2:
-        majority_count = class_counts.max()
-        minority_count = class_counts.min()
-        imbalance_ratio = majority_count / minority_count
-        is_imbalanced = imbalance_ratio > 2.0
-        print(f"Class imbalance ratio: {imbalance_ratio:.2f} - {'Imbalanced' if is_imbalanced else 'Balanced'}")
-        
-        # Calculate weight for the positive class (assuming 1 is the minority)
-        pos_weight = torch.tensor([imbalance_ratio], device=device)
-        print(f"Using positive class weight: {imbalance_ratio:.2f}")
+    # Apply SMOTE to the training data, similar to the notebook
+    print("\nApplying SMOTE to training data...")
+    train_fingerprints = []
+    train_valid_indices = []
+    train_original_smiles_list = []
+
+    for idx, row in original_train_df.iterrows():
+        fp = generate_morgan_fingerprints(row['smiles']) # Assuming nBits=1024, radius=2 from notebook context
+        if fp is not None:
+            train_fingerprints.append(fp)
+            train_valid_indices.append(idx) # Store original dataframe index
+            train_original_smiles_list.append(row['smiles'])
+
+    if not train_fingerprints:
+        print("Warning: No valid fingerprints generated for SMOTE. Using original training data.")
+        train_df = original_train_df.copy()
     else:
-        is_imbalanced = False
-        pos_weight = torch.tensor([1.0], device=device)
-        print("Using equal class weights")
+        X_train_fp = np.array(train_fingerprints)
+        # Get labels corresponding to the valid fingerprints
+        y_train_original = original_train_df.loc[train_valid_indices, 'active'].values 
+        
+        print(f"Class distribution before SMOTE on {len(y_train_original)} valid training samples:")
+        print(pd.Series(y_train_original).value_counts(normalize=True))
+
+        smote = SMOTE(random_state=42)
+        try:
+            X_train_resampled_fp, y_train_resampled = smote.fit_resample(X_train_fp, y_train_original)
+            print(f"Class distribution after SMOTE (Fingerprints: {X_train_resampled_fp.shape[0]}):")
+            print(pd.Series(y_train_resampled).value_counts(normalize=True))
+
+            # Reconstruct balanced dataframe for training
+            # Map original fingerprints back to original SMILES
+            fp_to_smiles_map = {tuple(fp): smi for fp, smi in zip(X_train_fp, train_original_smiles_list)}
+            
+            resampled_smiles_for_train = []
+            for fp_resampled in X_train_resampled_fp:
+                fp_tuple = tuple(fp_resampled)
+                if fp_tuple in fp_to_smiles_map:
+                    resampled_smiles_for_train.append(fp_to_smiles_map[fp_tuple])
+                else:
+                    # For synthetic samples, find nearest original fingerprint and use its SMILES
+                    distances = np.linalg.norm(X_train_fp - fp_resampled, axis=1)
+                    nearest_idx = np.argmin(distances)
+                    resampled_smiles_for_train.append(train_original_smiles_list[nearest_idx])
+            
+            train_df = pd.DataFrame({
+                'smiles': resampled_smiles_for_train,
+                'active': y_train_resampled
+            })
+            print(f"SMOTE applied. New training set size: {len(train_df)}")
+
+        except Exception as e:
+            print(f"Error applying SMOTE: {e}. Using original training data.")
+            train_df = original_train_df.copy() # Fallback to original if SMOTE fails
+
+    print(f"Final Train set size: {len(train_df)}")
 
     # Create datasets and dataloaders
-    train_dataset = MoleculeDataset(train_df)
+    train_dataset = MoleculeDataset(train_df) # Use the SMOTE-balanced train_df
     val_dataset = MoleculeDataset(val_df)
     test_dataset = MoleculeDataset(test_df)
 
@@ -379,15 +420,20 @@ def train_and_evaluate(model_name, hyperparams):
 
     # Check if any dataloaders are empty
     if len(train_dataset) == 0 or len(val_dataset) == 0 or len(test_dataset) == 0:
-        print("Error: One or more datasets are empty!")
+        print("Error: One or more datasets are empty after SMOTE/processing!")
+        # Log dataset sizes for debugging
+        print(f"Train dataset length: {len(train_dataset)}")
+        print(f"Validation dataset length: {len(val_dataset)}")
+        print(f"Test dataset length: {len(test_dataset)}")
         return None, None
 
     # Create model with a single output for binary classification
+    # Adjust in_channels and edge_dim according to the new MoleculeDataset features
     model = AttentiveFP(
-        in_channels=10,  # Enhanced atom features
+        in_channels=7,  # Atom features: num, degree, charge, rad_elec, hybridization, aromatic, num_hs
         hidden_channels=hyperparams['hidden_channels'],
         out_channels=1,  # Single output for binary classification with BCEWithLogitsLoss
-        edge_dim=6,  # Enhanced bond features
+        edge_dim=5,  # Bond features: single, double, triple, aromatic, conjugated
         num_layers=hyperparams['num_layers'],
         num_timesteps=hyperparams['num_timesteps'],
         dropout=hyperparams['dropout']
@@ -409,22 +455,26 @@ def train_and_evaluate(model_name, hyperparams):
         weight_decay=hyperparams['weight_decay']
     )
     
-    # Loss function - weighted BCEWithLogitsLoss for imbalanced binary classification
-    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    # Loss function - Unweighted BCEWithLogitsLoss as data is now balanced by SMOTE
+    criterion = nn.BCEWithLogitsLoss() # Removed pos_weight
 
     # Learning rate scheduler
-    num_training_steps = hyperparams['epochs'] * len(train_loader)
-    num_warmup_steps = num_training_steps // 10
+    num_training_steps = hyperparams['epochs'] * len(train_loader) if len(train_loader) > 0 else hyperparams['epochs']
+    num_warmup_steps = num_training_steps // 10 if num_training_steps > 0 else 0
     
-    def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps):
-        def lr_lambda(current_step):
-            if current_step < num_warmup_steps:
-                return float(current_step) / float(max(1, num_warmup_steps))
-            progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
-            return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
-        return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    if len(train_loader) == 0: # Handle empty train_loader for scheduler
+         scheduler = None
+    else:
+        def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps):
+            def lr_lambda(current_step):
+                if num_training_steps == 0 : return 1.0 # Avoid division by zero
+                if current_step < num_warmup_steps:
+                    return float(current_step) / float(max(1, num_warmup_steps))
+                progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
+                return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
+            return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+        scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps)
 
-    scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps)
 
     # Early stopping
     early_stopping = EarlyStopping(patience=hyperparams['patience'])
@@ -434,41 +484,57 @@ def train_and_evaluate(model_name, hyperparams):
 
     # Training loop
     for epoch in range(hyperparams['epochs']):
-        # Training
-        train_metrics, train_preds, train_targets = train_epoch(
-            model, train_loader, optimizer, criterion, device, scheduler
-        )
+        if len(train_loader) == 0:
+            print("Skipping training epoch as train_loader is empty.")
+            # Populate history with dummy values if needed or handle appropriately
+            for k_metric in ['loss', 'accuracy', 'precision', 'recall', 'f1', 'auc']:
+                history[f'train_{k_metric}'].append(float('nan'))
+            # Still run validation and test
+        else:
+            # Training
+            train_metrics, train_preds, train_targets = train_epoch(
+                model, train_loader, optimizer, criterion, device, scheduler
+            )
+            for k, v in train_metrics.items():
+                history[f'train_{k}'].append(v)
         
         # Validation
-        val_metrics, val_preds, val_targets = evaluate(
-            model, val_loader, criterion, device
-        )
-        
+        if len(val_loader) > 0:
+            val_metrics, val_preds, val_targets = evaluate(
+                model, val_loader, criterion, device
+            )
+            for k, v in val_metrics.items():
+                history[f'val_{k}'].append(v)
+        else: # Handle empty val_loader
+            val_metrics = {'loss': float('nan'), 'auc': float('nan')} # for early stopping
+            for k_metric in ['loss', 'accuracy', 'precision', 'recall', 'f1', 'auc']:
+                 history[f'val_{k_metric}'].append(float('nan'))
+
+
         # Test
-        test_metrics, test_preds, test_targets = evaluate(
-            model, test_loader, criterion, device
-        )
-        
-        # Update history
-        for k, v in train_metrics.items():
-            history[f'train_{k}'].append(v)
-        for k, v in val_metrics.items():
-            history[f'val_{k}'].append(v)
-        for k, v in test_metrics.items():
-            history[f'test_{k}'].append(v)
-        
+        if len(test_loader) > 0:
+            test_metrics, test_preds, test_targets = evaluate(
+                model, test_loader, criterion, device
+            )
+            for k, v in test_metrics.items():
+                history[f'test_{k}'].append(v)
+        else: # Handle empty test_loader
+            for k_metric in ['loss', 'accuracy', 'precision', 'recall', 'f1', 'auc']:
+                 history[f'test_{k_metric}'].append(float('nan'))
+
         # Print metrics
         print(f"\nEpoch {epoch+1}/{hyperparams['epochs']}")
-        print("Train -", ' '.join([f"{k}: {v:.4f}" for k, v in train_metrics.items()]))
-        print("Val   -", ' '.join([f"{k}: {v:.4f}" for k, v in val_metrics.items()]))
-        print("Test  -", ' '.join([f"{k}: {v:.4f}" for k, v in test_metrics.items()]))
+        if len(train_loader)>0: print("Train -", ' '.join([f"{k}: {v:.4f}" for k, v in train_metrics.items()]))
+        if len(val_loader)>0: print("Val   -", ' '.join([f"{k}: {v:.4f}" for k, v in val_metrics.items()]))
+        if len(test_loader)>0: print("Test  -", ' '.join([f"{k}: {v:.4f}" for k, v in test_metrics.items()]))
         
-        # Early stopping check
-        early_stopping(val_metrics['loss'], model)
+        # Early stopping check (use validation loss)
+        early_stopping(val_metrics['loss'], model) # val_metrics['loss'] could be nan
         if early_stopping.early_stop:
             print(f"Early stopping at epoch {epoch+1}")
             # Load best model
-            model.load_state_dict(early_stopping.best_state_dict)
+            if early_stopping.best_state_dict:
+                model.load_state_dict(early_stopping.best_state_dict)
             break
     
     # Load best model for final evaluation
@@ -476,36 +542,50 @@ def train_and_evaluate(model_name, hyperparams):
         model.load_state_dict(early_stopping.best_state_dict)
     
     # Final evaluation
-    final_train_metrics, final_train_preds, final_train_targets = evaluate(model, train_loader, criterion, device)
-    final_val_metrics, final_val_preds, final_val_targets = evaluate(model, val_loader, criterion, device)
-    final_test_metrics, final_test_preds, final_test_targets = evaluate(model, test_loader, criterion, device)
+    final_train_metrics, final_val_metrics, final_test_metrics = {}, {}, {}
+    final_train_preds, final_val_preds, final_test_preds = np.array([]), np.array([]), np.array([])
+    final_train_targets, final_val_targets, final_test_targets = np.array([]), np.array([]), np.array([])
+
+    if len(train_loader) > 0:
+        final_train_metrics, final_train_preds, final_train_targets = evaluate(model, train_loader, criterion, device)
+        print("\n=== Final Evaluation (Train) ===")
+        print("Train -", ' '.join([f"{k}: {v:.4f}" for k, v in final_train_metrics.items()]))
+    if len(val_loader) > 0:
+        final_val_metrics, final_val_preds, final_val_targets = evaluate(model, val_loader, criterion, device)
+        print("\n=== Final Evaluation (Validation) ===")
+        print("Val   -", ' '.join([f"{k}: {v:.4f}" for k, v in final_val_metrics.items()]))
+    if len(test_loader) > 0:
+        final_test_metrics, final_test_preds, final_test_targets = evaluate(model, test_loader, criterion, device)
+        print("\n=== Final Evaluation (Test) ===")
+        print("Test  -", ' '.join([f"{k}: {v:.4f}" for k, v in final_test_metrics.items()]))
     
-    print("\n=== Final Evaluation ===")
-    print("Train -", ' '.join([f"{k}: {v:.4f}" for k, v in final_train_metrics.items()]))
-    print("Val   -", ' '.join([f"{k}: {v:.4f}" for k, v in final_val_metrics.items()]))
-    print("Test  -", ' '.join([f"{k}: {v:.4f}" for k, v in final_test_metrics.items()]))
+    # Generate and save plots only if data is available
+    if len(history['train_loss']) > 0 : # Check if training actually ran
+        fig_hist = plot_training_history(history, title=f'Training History - {model_name}')
+        fig_hist.savefig(f"../plots/{model_name}_training_history.png")
+        plt.close(fig_hist)
     
-    # Generate and save plots
-    # 1. Training history
-    fig = plot_training_history(history, title=f'Training History - {model_name}')
-    fig.savefig(f"../plots/{model_name}_training_history.png")
-    plt.close()
+    if final_test_targets.size > 0 and final_test_preds.size > 0:
+        binary_test_preds = (final_test_preds > 0.5).astype(int)
+        fig_cm = plot_confusion_matrix(final_test_targets, binary_test_preds, title=f'Confusion Matrix (Test) - {model_name}')
+        fig_cm.savefig(f"../plots/{model_name}_confusion_matrix.png")
+        plt.close(fig_cm)
+        
+        fig_roc = plot_roc_curve(final_test_targets, final_test_preds, title=f'ROC Curve (Test) - {model_name}')
+        fig_roc.savefig(f"../plots/{model_name}_roc_curve.png")
+        plt.close(fig_roc)
     
-    # 2. Confusion matrix (test set)
-    binary_test_preds = (final_test_preds > 0.5).astype(int)
-    fig = plot_confusion_matrix(final_test_targets, binary_test_preds, title=f'Confusion Matrix (Test) - {model_name}')
-    fig.savefig(f"../plots/{model_name}_confusion_matrix.png")
-    plt.close()
+    plt.close('all') # Close any other stray plots
     
-    # 3. ROC curve (test set)
-    fig = plot_roc_curve(final_test_targets, final_test_preds, title=f'ROC Curve (Test) - {model_name}')
-    fig.savefig(f"../plots/{model_name}_roc_curve.png")
-    plt.close()
-    
-    # Close all plot windows
-    plt.close('all')
-    
-    return final_test_metrics, model
+    # Return test metrics if available, otherwise validation, otherwise training, otherwise empty
+    if final_test_metrics:
+        return final_test_metrics, model
+    elif final_val_metrics:
+        return final_val_metrics, model
+    elif final_train_metrics:
+        return final_train_metrics, model
+    else:
+        return {"loss": float('nan'), "auc": float('nan')}, model # Default if no evaluation happened
 # Define hyperparameter configurations to try
 hyperparameter_configs = [
     {
@@ -623,76 +703,4 @@ if __name__ == "__main__":
                 best_config_name = best_config['name']
                 best_idx = next(i for i, r in enumerate(dataset_results) if r["config_name"] == best_config_name)
                 best_metrics = {
-                    "accuracy": dataset_results[best_idx]["accuracy"],
-                    "precision": dataset_results[best_idx]["precision"],
-                    "recall": dataset_results[best_idx]["recall"],
-                    "f1": dataset_results[best_idx]["f1"],
-                    "auc": dataset_results[best_idx]["auc"]
-                }
-                
-                # Add best model information
-                print("\n=== Best Model ===")
-                print(f"Configuration: {best_config_name}")
-                print(f"Accuracy: {best_metrics['accuracy']:.4f}")
-                print(f"Precision: {best_metrics['precision']:.4f}")
-                print(f"Recall: {best_metrics['recall']:.4f}")
-                print(f"F1 Score: {best_metrics['f1']:.4f}")
-                if best_metrics['auc'] > 0:
-                    print(f"AUC: {best_metrics['auc']:.4f}")
-                    
-                print("Hyperparameters:")
-                for key, value in best_config.items():
-                    if key != 'name':
-                        print(f"  {key}: {value}")
-
-                # Save only the best model with its hyperparameters
-                best_model_path = f"../models/{model_name}_attentivefp_best.pt"
-                torch.save({
-                    'model_state_dict': best_model.state_dict(),
-                    'hyperparameters': best_config
-                }, best_model_path)
-                print(f"Best model saved to {best_model_path}")
-                
-                # Save best model info to CSV
-                best_model_info = {
-                    'metric': ['Dataset', 'Accuracy', 'Precision', 'Recall', 'F1 Score', 'AUC'] + list(best_config.keys()),
-                    'value': [model_name, best_metrics['accuracy'], best_metrics['precision'], 
-                             best_metrics['recall'], best_metrics['f1'], best_metrics['auc']] + list(best_config.values())
-                }
-                best_model_df = pd.DataFrame(best_model_info)
-                
-                # Save to CSV
-                with open(f"../models/{model_name}_best_model_info.csv", 'w') as f:
-                    f.write("=== Best Model ===\n")
-                    best_model_df.to_csv(f, index=False)
-
-    # After processing all datasets, create an overall summary
-    if all_results:
-        # Create a DataFrame with all results
-        all_results_df = pd.DataFrame(all_results)
-        
-        # Save all results to CSV
-        all_results_df.to_csv("../models/classification_all_results.csv", index=False)
-        
-        # Create a summary of best models for each dataset
-        best_models_summary = []
-        for dataset in all_results_df['dataset'].unique():
-            dataset_results = all_results_df[all_results_df['dataset'] == dataset]
-            best_idx = dataset_results['f1'].idxmax()
-            best_row = dataset_results.loc[best_idx]
-            
-            best_models_summary.append({
-                'dataset': best_row['dataset'],
-                'best_config': best_row['config_name'],
-                'accuracy': best_row['accuracy'],
-                'precision': best_row['precision'],
-                'recall': best_row['recall'],
-                'f1': best_row['f1'],
-                'auc': best_row['auc']
-            })
-        
-        best_models_df = pd.DataFrame(best_models_summary)
-        best_models_df.to_csv("../models/classification_best_models_summary.csv", index=False)
-        
-        print("\n=== Best Models Summary ===")
-        print(best_models_df)
+                    "accuracy": dataset_results[best_
