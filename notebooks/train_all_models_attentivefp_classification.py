@@ -427,17 +427,23 @@ def train_and_evaluate(model_name, hyperparams):
         print(f"Test dataset length: {len(test_dataset)}")
         return None, None
 
-    # Create model with a single output for binary classification
-    # Adjust in_channels and edge_dim according to the new MoleculeDataset features
+    # Inside train_and_evaluate, before model instantiation
+    print(f"DEBUG: Initializing AttentiveFP with in_channels=7, hidden_channels={hyperparams['hidden_channels']}, edge_dim=5")
+    
     model = AttentiveFP(
-        in_channels=7,  # Atom features: num, degree, charge, rad_elec, hybridization, aromatic, num_hs
+        in_channels=7,
         hidden_channels=hyperparams['hidden_channels'],
-        out_channels=1,  # Single output for binary classification with BCEWithLogitsLoss
-        edge_dim=5,  # Bond features: single, double, triple, aromatic, conjugated
+        out_channels=1,
+        edge_dim=2,  # Change to match your actual bond features
         num_layers=hyperparams['num_layers'],
         num_timesteps=hyperparams['num_timesteps'],
         dropout=hyperparams['dropout']
     ).to(device)
+
+    # Optionally, print model's perception of its parameters if accessible
+    # print(f"DEBUG: Model initialized with model.hidden_channels={model.hidden_channels}, model.in_channels={model.original_in_channels_attr_name_if_exists}") # Adjust attribute names
+    # print(f"DEBUG: model.gate_conv.lin1.weight.shape = {model.gate_conv.lin1.weight.shape}")
+    # Expected shape for model.gate_conv.lin1.weight should be (hyperparams['hidden_channels'], hyperparams['hidden_channels'] + 5)
 
     # Initialize weights
     def init_weights(m):
@@ -695,84 +701,3 @@ if __name__ == "__main__":
             plt.title("F1 Score")
 
             plt.tight_layout()
-            plt.savefig(f"../plots/{model_name}_hyperparameter_comparison.png")
-            plt.close()
-
-            # If we found a best model
-            if best_model is not None and best_config is not None:
-                best_config_name = best_config['name']
-                best_idx = next(i for i, r in enumerate(dataset_results) if r["config_name"] == best_config_name)
-                best_metrics = {
-                    "accuracy": dataset_results[best_idx]["accuracy"],
-                    "precision": dataset_results[best_idx]["precision"],
-                    "recall": dataset_results[best_idx]["recall"],
-                    "f1": dataset_results[best_idx]["f1"],
-                    "auc": dataset_results[best_idx]["auc"]
-                }
-
-                # Add best model information
-                print("\n=== Best Model ===")
-                print(f"Configuration: {best_config_name}")
-                print(f"Accuracy: {best_metrics['accuracy']:.4f}")
-                print(f"Precision: {best_metrics['precision']:.4f}")
-                print(f"Recall: {best_metrics['recall']:.4f}")
-                print(f"F1 Score: {best_metrics['f1']:.4f}")
-                if best_metrics['auc'] > 0:
-                    print(f"AUC: {best_metrics['auc']:.4f}")
-
-                print("Hyperparameters:")
-                for key, value in best_config.items():
-                    if key != 'name':
-                        print(f"  {key}: {value}")
-
-                # Save only the best model with its hyperparameters
-                best_model_path = f"../models/{model_name}_attentivefp_best.pt"
-                torch.save({
-                    'model_state_dict': best_model.state_dict(),
-                    'hyperparameters': best_config
-                }, best_model_path)
-                print(f"Best model saved to {best_model_path}")
-
-                # Save best model info to CSV
-                best_model_info = {
-                    'metric': ['Dataset', 'Accuracy', 'Precision', 'Recall', 'F1 Score', 'AUC'] + list(best_config.keys()),
-                    'value': [model_name, best_metrics['accuracy'], best_metrics['precision'],
-                             best_metrics['recall'], best_metrics['f1'], best_metrics['auc']] + list(best_config.values())
-                }
-                best_model_df = pd.DataFrame(best_model_info)
-
-                # Save to CSV
-                with open(f"../models/{model_name}_best_model_info.csv", 'w') as f:
-                    f.write("=== Best Model ===\n")
-                    best_model_df.to_csv(f, index=False)
-
-    # After processing all datasets, create an overall summary
-    if all_results:
-        # Create a DataFrame with all results
-        all_results_df = pd.DataFrame(all_results)
-
-        # Save all results to CSV
-        all_results_df.to_csv("../models/classification_all_results.csv", index=False)
-
-        # Create a summary of best models for each dataset
-        best_models_summary = []
-        for dataset in all_results_df['dataset'].unique():
-            dataset_results = all_results_df[all_results_df['dataset'] == dataset]
-            best_idx = dataset_results['f1'].idxmax()
-            best_row = dataset_results.loc[best_idx]
-
-            best_models_summary.append({
-                'dataset': best_row['dataset'],
-                'best_config': best_row['config_name'],
-                'accuracy': best_row['accuracy'],
-                'precision': best_row['precision'],
-                'recall': best_row['recall'],
-                'f1': best_row['f1'],
-                'auc': best_row['auc']
-            })
-
-        best_models_df = pd.DataFrame(best_models_summary)
-        best_models_df.to_csv("../models/classification_best_models_summary.csv", index=False)
-
-        print("\n=== Best Models Summary ===")
-        print(best_models_df)
