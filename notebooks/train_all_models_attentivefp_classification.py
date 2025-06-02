@@ -40,24 +40,25 @@ os.makedirs("../models", exist_ok=True)
 os.makedirs("../plots", exist_ok=True)
 
 # Define evaluation metrics and visualization functions
+
 def plot_confusion_matrix(y_true, y_pred, title='Confusion Matrix'):
     """Plot confusion matrix"""
     cm = confusion_matrix(y_true, y_pred)
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+    fig = plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
                 xticklabels=['Negative', 'Positive'],
                 yticklabels=['Negative', 'Positive'])
     plt.xlabel('Predicted')
     plt.ylabel('True')
     plt.title(title)
-    return plt
+    return fig
 
 def plot_roc_curve(y_true, y_pred, title='ROC Curve'):
     """Plot ROC curve"""
     fpr, tpr, _ = roc_curve(y_true, y_pred)
     roc_auc = auc(fpr, tpr)
-    
-    plt.figure(figsize=(8, 6))
+
+    fig = plt.figure(figsize=(8, 6))
     plt.plot(fpr, tpr, label=f'AUC = {roc_auc:.3f}')
     plt.plot([0, 1], [0, 1], 'k--')
     plt.xlim([0.0, 1.0])
@@ -66,20 +67,20 @@ def plot_roc_curve(y_true, y_pred, title='ROC Curve'):
     plt.ylabel('True Positive Rate')
     plt.title(title)
     plt.legend(loc="lower right")
-    return plt
+    return fig
 
 def plot_pr_curve(y_true, y_pred, title='Precision-Recall Curve'):
     """Plot Precision-Recall curve"""
     precision, recall, _ = precision_recall_curve(y_true, y_pred)
     pr_auc = auc(recall, precision)
-    
-    plt.figure(figsize=(8, 6))
+
+    fig = plt.figure(figsize=(8, 6))
     plt.plot(recall, precision, label=f'AUC = {pr_auc:.3f}')
     plt.xlabel('Recall')
     plt.ylabel('Precision')
     plt.title(title)
     plt.legend(loc="lower left")
-    return plt
+    return fig
 
 def plot_training_history(history, title='Training History'):
     """Plot training and validation metrics over epochs"""
