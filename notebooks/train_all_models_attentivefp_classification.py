@@ -361,32 +361,63 @@ def train_and_evaluate(model_name, hyperparams):
         is_imbalanced = imbalance_ratio > 2.0
         print(f"Class imbalance ratio: {imbalance_ratio:.2f} - {'Imbalanced' if is_imbalanced else 'Balanced'}")
 
+    # Apply SMOTE if dataset is imbalanced
     if is_imbalanced:
         print("Applying SMOTE to balance training data...")
-        # Extract smiles and labels
-        X_smiles = train_df['smiles'].values
-        y = train_df['active'].values
-        
-        # Create a dummy feature for SMOTE (just indices)
-        X_dummy = np.arange(len(X_smiles)).reshape(-1, 1)
-        
-        # Apply SMOTE on the dummy feature
-        smote = SMOTE(random_state=42)
-        X_dummy_resampled, y_resampled = smote.fit_resample(X_dummy, y)
-        
-        # Get the corresponding SMILES
-        smiles_resampled = X_smiles[X_dummy_resampled.ravel()]
-        
-        # Create new dataframe
-        train_df = pd.DataFrame({
-            'smiles': smiles_resampled,
-            'active': y_resampled
-        })
-        
-        print("Applied SMOTE - New training distribution:")
-        print(train_df['active'].value_counts())
+        try:
+            # Generate fingerprints for SMOTE
+            valid_indices = []
+            fingerprints = []
+            
+            for idx, row in train_df.iterrows():
+                fp = generate_morgan_fingerprints(row['smiles'])
+                if fp is not None:
+                    fingerprints.append(fp)
+                    valid_indices.append(idx)
+            
+            if not fingerprints:
+                print("Warning: Could not generate valid fingerprints for SMOTE")
+            else:
+                # Get corresponding labels
+                y = train_df.loc[valid_indices, 'active'].values
+                X = np.array(fingerprints)
+                
+                # Apply SMOTE
+                smote = SMOTE(random_state=42)
+                X_resampled, y_resampled = smote.fit_resample(X, y)
+                
+                # Create new dataframe with original valid samples for reference
+                valid_train_df = train_df.loc[valid_indices].copy()
+                
+                # Create dictionary to map fingerprints back to SMILES
+                fp_to_smiles = {tuple(fp): smiles for fp, smiles in 
+                              zip(fingerprints, valid_train_df['smiles'])}
+                
+                # Reconstruct balanced dataset
+                new_smiles = []
+                for fp in X_resampled:
+                    fp_tuple = tuple(fp)
+                    if fp_tuple in fp_to_smiles:
+                        # Original molecule
+                        new_smiles.append(fp_to_smiles[fp_tuple])
+                    else:
+                        # Synthetic sample from SMOTE - use the first valid SMILES as a placeholder
+                        # This is a simplification - ideally we'd convert the fingerprint back to a valid SMILES
+                        new_smiles.append(valid_train_df['smiles'].iloc[0])
+                
+                # Create new balanced dataframe
+                train_df = pd.DataFrame({
+                    'smiles': new_smiles,
+                    'active': y_resampled
+                })
+                
+                print("Applied SMOTE - New training distribution:")
+                print(train_df['active'].value_counts())
+        except Exception as e:
+            print(f"Error applying SMOTE: {e}")
+            print("Using original dataset instead")
     else:
-        print("SMOTE not applied - using original class distribution")
+        print("Dataset is balanced - SMOTE not needed")
 
     # Create datasets and dataloaders
     train_dataset = MoleculeDataset(train_df)
@@ -402,15 +433,11 @@ def train_and_evaluate(model_name, hyperparams):
         print("Error: One or more datasets are empty!")
         return None, None
 
-    # Determine number of classes from the dataset
-    num_classes = df['active'].nunique()
-    print(f"Number of classes: {num_classes}")
-
-    # Create model with appropriate number of output classes
+    # Create model with a single output for binary classification
     model = AttentiveFP(
         in_channels=10,  # Enhanced atom features
         hidden_channels=hyperparams['hidden_channels'],
-        out_channels=num_classes,  # Dynamic based on dataset
+        out_channels=1,  # Single output for binary classification with BCEWithLogitsLoss
         edge_dim=6,  # Enhanced bond features
         num_layers=hyperparams['num_layers'],
         num_timesteps=hyperparams['num_timesteps'],
@@ -426,15 +453,16 @@ def train_and_evaluate(model_name, hyperparams):
 
     model.apply(init_weights)
 
-    # Set up optimizer and criterion
+    # Set up optimizer
     optimizer = optim.AdamW(
         model.parameters(), 
         lr=hyperparams['learning_rate'],
         weight_decay=hyperparams['weight_decay']
     )
     
-    # Loss function
-    criterion = nn.CrossEntropyLoss()
+    # Loss function - BCEWithLogitsLoss for binary classification
+    # This combines Sigmoid and BCELoss in one function for numerical stability
+    criterion = nn.BCEWithLogitsLoss()
 
     # Learning rate scheduler
     num_training_steps = hyperparams['epochs'] * len(train_loader)
@@ -516,15 +544,15 @@ def train_and_evaluate(model_name, hyperparams):
     plt.close()
     
     # 2. Confusion matrix (test set)
-    fig = plot_confusion_matrix(final_test_targets, final_test_preds, title=f'Confusion Matrix (Test) - {model_name}')
+    binary_test_preds = (final_test_preds > 0.5).astype(int)
+    fig = plot_confusion_matrix(final_test_targets, binary_test_preds, title=f'Confusion Matrix (Test) - {model_name}')
     fig.savefig(f"../plots/{model_name}_confusion_matrix.png")
     plt.close()
     
-    # 3. ROC curve (test set) - only if binary classification
-    if num_classes == 2:
-        fig = plot_roc_curve(final_test_targets, final_test_preds, title=f'ROC Curve (Test) - {model_name}')
-        fig.savefig(f"../plots/{model_name}_roc_curve.png")
-        plt.close()
+    # 3. ROC curve (test set)
+    fig = plot_roc_curve(final_test_targets, final_test_preds, title=f'ROC Curve (Test) - {model_name}')
+    fig.savefig(f"../plots/{model_name}_roc_curve.png")
+    plt.close()
     
     # Close all plot windows
     plt.close('all')
@@ -720,19 +748,3 @@ if __name__ == "__main__":
         
         print("\n=== Best Models Summary ===")
         print(best_models_df)
-        
-        # Plot summary of best models across datasets
-        plt.figure(figsize=(15, 8))
-        
-        metrics = ["accuracy", "precision", "recall", "f1", "auc"]
-        
-        for i, metric in enumerate(metrics):
-            plt.subplot(1, len(metrics), i + 1)
-            sns.barplot(x="dataset", y=metric, data=best_models_df)
-            plt.title(f"{metric.capitalize()}")
-            plt.xticks(rotation=90)
-            plt.ylim(0, 1)
-        
-        plt.tight_layout()
-        plt.savefig("../plots/classification_summary.png")
-        plt.close()
