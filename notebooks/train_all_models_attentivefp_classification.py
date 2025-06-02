@@ -172,14 +172,18 @@ class MoleculeDataset(Dataset):
         self.smiles_col = smiles_col
         self.target_col = target_col
         self.data_list = self._prepare_data()
-        
+
     def _prepare_data(self):
         data_list = []
+        skipped_invalid_smiles = 0
+        skipped_no_bonds = 0
+
         for idx, row in self.df.iterrows():
             mol = Chem.MolFromSmiles(row[self.smiles_col])
             if mol is None:
+                skipped_invalid_smiles += 1
                 continue
-                
+
             # Enhanced atom features
             atom_features = []
             for atom in mol.GetAtoms():
@@ -191,15 +195,11 @@ class MoleculeDataset(Dataset):
                     atom.GetNumRadicalElectrons(),
                     int(atom.GetIsAromatic()),
                     int(atom.IsInRing()),
-                    # Hybridization as one-hot
-                    #int(atom.GetHybridization() == Chem.rdchem.HybridizationType.SP),
-                    #int(atom.GetHybridization() == Chem.rdchem.HybridizationType.SP2),
-                    #int(atom.GetHybridization() == Chem.rdchem.HybridizationType.SP3)
                 ]
                 atom_features.append(features)
-                
+
             x = torch.tensor(atom_features, dtype=torch.float)
-            
+
             # Enhanced bond features
             edges_list = []
             edge_features = []
@@ -207,25 +207,20 @@ class MoleculeDataset(Dataset):
                 i = bond.GetBeginAtomIdx()
                 j = bond.GetEndAtomIdx()
                 edges_list.extend([[i, j], [j, i]])
-                
+
                 features = [
-                    # Bond type as one-hot
-                    #int(bond.GetBondType() == Chem.rdchem.BondType.SINGLE),
-                    #int(bond.GetBondType() == Chem.rdchem.BondType.DOUBLE),
-                    #int(bond.GetBondType() == Chem.rdchem.BondType.TRIPLE),
-                    #int(bond.GetBondType() == Chem.rdchem.BondType.AROMATIC),
-                    # Additional features
                     int(bond.GetIsConjugated()),
                     int(bond.IsInRing())
                 ]
                 edge_features.extend([features, features])
-                
+
             if not edges_list:  # Skip molecules with no bonds
+                skipped_no_bonds += 1
                 continue
-                
+
             edge_index = torch.tensor(edges_list, dtype=torch.long).t()
             edge_attr = torch.tensor(edge_features, dtype=torch.float)
-            
+
             # Create PyG Data object
             data = Data(
                 x=x,
@@ -234,13 +229,13 @@ class MoleculeDataset(Dataset):
                 y=torch.tensor([float(row[self.target_col])], dtype=torch.float),
             )
             data_list.append(data)
-        return data_list
 
-    def len(self):
-        return len(self.data_list)
-    
-    def get(self, idx):
-        return self.data_list[idx]
+        if skipped_invalid_smiles > 0:
+            print(f"Skipped {skipped_invalid_smiles} molecules due to invalid SMILES")
+        if skipped_no_bonds > 0:
+            print(f"Skipped {skipped_no_bonds} molecules with no bonds")
+
+        return data_list
 
 def train_epoch(model, loader, optimizer, criterion, device, scheduler=None):
     """Train model for one epoch"""
