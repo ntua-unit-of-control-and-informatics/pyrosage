@@ -480,9 +480,31 @@ def train_and_evaluate(model_name, hyperparams):
         lr=hyperparams['learning_rate'],
         weight_decay=hyperparams['weight_decay']
     )
-    
-    # Loss function - Unweighted BCEWithLogitsLoss as data is now balanced by SMOTE
-    criterion = nn.BCEWithLogitsLoss() # Removed pos_weight
+    # After creating datasets and before model initialization
+
+    # Calculate class weights for imbalanced datasets (even with SMOTE applied)
+    # This helps the model focus on minority class during training
+    if df['active'].nunique() == 2:  # Binary classification
+        class_counts = df['active'].value_counts()
+        total_samples = len(df)
+        weight_for_0 = 1.0 / (class_counts[0] / total_samples)
+        weight_for_1 = 1.0 / (class_counts[1] / total_samples)
+
+        # Normalize weights
+        weight_sum = weight_for_0 + weight_for_1
+        weight_for_0 = weight_for_0 / weight_sum
+        weight_for_1 = weight_for_1 / weight_sum
+
+        # Check if highly imbalanced (one class < 20%)
+        if min(class_counts) / total_samples < 0.2:
+            # Apply class weighting for highly imbalanced datasets
+            pos_weight = torch.tensor([weight_for_1 / weight_for_0]).to(device)
+            print(f"Using positive class weight: {pos_weight.item():.4f} for imbalanced dataset")
+            criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+        else:
+            criterion = nn.BCEWithLogitsLoss()  # No weighting for balanced datasets
+    else:
+        criterion = nn.BCEWithLogitsLoss()  # Default for non-binary classification
 
     # Learning rate scheduler
     num_training_steps = hyperparams['epochs'] * len(train_loader) if len(train_loader) > 0 else hyperparams['epochs']
@@ -623,6 +645,18 @@ hyperparameter_configs = [
         'batch_size': 32,
         'epochs': 50,
         'patience': 10
+    },
+    {
+        'name': 'class_imbalance_focused',  # New configuration
+        'hidden_channels': 64,
+        'num_layers': 2,
+        'num_timesteps': 3,
+        'dropout': 0.3,  # Higher dropout to prevent overfitting
+        'learning_rate': 0.0005,  # Lower learning rate
+        'weight_decay': 1e-4,  # Higher weight decay
+        'batch_size': 16,  # Smaller batch size
+        'epochs': 75,  # More epochs
+        'patience': 15  # More patience
     },
     {
         'name': 'larger_model',
