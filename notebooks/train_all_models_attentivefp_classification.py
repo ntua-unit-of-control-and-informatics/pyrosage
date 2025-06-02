@@ -729,4 +729,106 @@ if __name__ == "__main__":
             print(results_df)
 
             # Plot comparison
-            plt.figure(figsize=(
+            plt.figure(figsize=(15, 8))
+
+            plt.subplot(2, 2, 1)
+            sns.barplot(x="config_name", y="accuracy", data=results_df)
+            plt.title("Accuracy")
+
+            plt.subplot(2, 2, 2)
+            sns.barplot(x="config_name", y="precision", data=results_df)
+            plt.title("Precision")
+
+            plt.subplot(2, 2, 3)
+            sns.barplot(x="config_name", y="recall", data=results_df)
+            plt.title("Recall")
+
+            plt.subplot(2, 2, 4)
+            sns.barplot(x="config_name", y="f1", data=results_df)
+            plt.title("F1 Score")
+
+            plt.tight_layout()
+            plt.savefig(f"../plots/{model_name}_hyperparameter_comparison.png")
+            plt.close()
+
+            # If we found a best model
+            if best_model is not None and best_config is not None:
+                best_config_name = best_config['name']
+                best_idx = next(i for i, r in enumerate(dataset_results) if r["config_name"] == best_config_name)
+                best_metrics = {
+                    "accuracy": dataset_results[best_idx]["accuracy"],
+                    "precision": dataset_results[best_idx]["precision"],
+                    "recall": dataset_results[best_idx]["recall"],
+                    "f1": dataset_results[best_idx]["f1"],
+                    "auc": dataset_results[best_idx]["auc"]
+                }
+
+                # Add best model information
+                print("\n=== Best Model ===")
+                print(f"Configuration: {best_config_name}")
+                print(f"Accuracy: {best_metrics['accuracy']:.4f}")
+                print(f"Precision: {best_metrics['precision']:.4f}")
+                print(f"Recall: {best_metrics['recall']:.4f}")
+                print(f"F1 Score: {best_metrics['f1']:.4f}")
+                if best_metrics['auc'] > 0:
+                    print(f"AUC: {best_metrics['auc']:.4f}")
+
+                print("Hyperparameters:")
+                for key, value in best_config.items():
+                    if key != 'name':
+                        print(f"  {key}: {value}")
+
+                # Save only the best model with its hyperparameters
+                best_model_path = f"../models/{model_name}_attentivefp_best.pt"
+                torch.save({
+                    'model_state_dict': best_model.state_dict(),
+                    'hyperparameters': best_config
+                }, best_model_path)
+                print(f"Best model saved to {best_model_path}")
+
+    # After processing all datasets, create an overall summary
+    if all_results:
+        # Create a DataFrame with all results
+        all_results_df = pd.DataFrame(all_results)
+
+        # Save all results to CSV
+        all_results_df.to_csv("../models/classification_all_results.csv", index=False)
+
+        # Create a summary of best models for each dataset
+        best_models_summary = []
+        for dataset in all_results_df['dataset'].unique():
+            dataset_results = all_results_df[all_results_df['dataset'] == dataset]
+            best_idx = dataset_results['f1'].idxmax()
+            best_row = dataset_results.loc[best_idx]
+
+            best_models_summary.append({
+                'dataset': best_row['dataset'],
+                'best_config': best_row['config_name'],
+                'accuracy': best_row['accuracy'],
+                'precision': best_row['precision'],
+                'recall': best_row['recall'],
+                'f1': best_row['f1'],
+                'auc': best_row['auc']
+            })
+
+        best_models_df = pd.DataFrame(best_models_summary)
+        best_models_df.to_csv("../models/classification_best_models_summary.csv", index=False)
+
+        print("\n=== Best Models Summary ===")
+        print(best_models_df)
+
+        # Plot summary of best models across datasets
+        plt.figure(figsize=(15, 8))
+
+        metrics = ["accuracy", "precision", "recall", "f1", "auc"]
+
+        for i, metric in enumerate(metrics):
+            plt.subplot(1, len(metrics), i + 1)
+            sns.barplot(x="dataset", y=metric, data=best_models_df)
+            plt.title(f"{metric.capitalize()}")
+            plt.xticks(rotation=90)
+            plt.ylim(0, 1)
+
+        plt.tight_layout()
+        plt.savefig("../plots/classification_summary.png")
+        plt.close()
