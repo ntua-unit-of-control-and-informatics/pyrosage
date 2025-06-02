@@ -351,6 +351,44 @@ def train_and_evaluate(model_name, hyperparams):
     print(f"Class distribution in val: {val_df['active'].value_counts()}")
     print(f"Class distribution in test: {test_df['active'].value_counts()}")
 
+    # Check if dataset is imbalanced (use threshold of 2:1 ratio)
+    class_counts = train_df['active'].value_counts()
+    is_imbalanced = False
+    if len(class_counts) >= 2:
+        majority_count = class_counts.max()
+        minority_count = class_counts.min()
+        imbalance_ratio = majority_count / minority_count
+        is_imbalanced = imbalance_ratio > 2.0
+        print(f"Class imbalance ratio: {imbalance_ratio:.2f} - {'Imbalanced' if is_imbalanced else 'Balanced'}")
+
+    # Apply SMOTE only if dataset is imbalanced and use_smote is enabled
+    if is_imbalanced and hyperparams.get('use_smote', False):
+        print("Applying SMOTE to balance training data...")
+        # Extract smiles and labels
+        X_smiles = train_df['smiles'].values
+        y = train_df['active'].values
+        
+        # Create a dummy feature for SMOTE (just indices)
+        X_dummy = np.arange(len(X_smiles)).reshape(-1, 1)
+        
+        # Apply SMOTE on the dummy feature
+        smote = SMOTE(random_state=42)
+        X_dummy_resampled, y_resampled = smote.fit_resample(X_dummy, y)
+        
+        # Get the corresponding SMILES
+        smiles_resampled = X_smiles[X_dummy_resampled.ravel()]
+        
+        # Create new dataframe
+        train_df = pd.DataFrame({
+            'smiles': smiles_resampled,
+            'active': y_resampled
+        })
+        
+        print("Applied SMOTE - New training distribution:")
+        print(train_df['active'].value_counts())
+    else:
+        print("SMOTE not applied - using original class distribution")
+
     # Create datasets and dataloaders
     train_dataset = MoleculeDataset(train_df)
     val_dataset = MoleculeDataset(val_df)
@@ -365,12 +403,15 @@ def train_and_evaluate(model_name, hyperparams):
         print("Error: One or more datasets are empty!")
         return None, None
 
-    # Create model
+    # Determine number of classes from the dataset
     num_classes = df['active'].nunique()
+    print(f"Number of classes: {num_classes}")
+
+    # Create model with appropriate number of output classes
     model = AttentiveFP(
         in_channels=10,  # Enhanced atom features
         hidden_channels=hyperparams['hidden_channels'],
-        out_channels=num_classes,  # Binary classification
+        out_channels=num_classes,  # Dynamic based on dataset
         edge_dim=6,  # Enhanced bond features
         num_layers=hyperparams['num_layers'],
         num_timesteps=hyperparams['num_timesteps'],
@@ -392,9 +433,9 @@ def train_and_evaluate(model_name, hyperparams):
         lr=hyperparams['learning_rate'],
         weight_decay=hyperparams['weight_decay']
     )
-
-    # Loss function for binary classification
-    criterion = nn.BCEWithLogitsLoss()
+    
+    # Loss function
+    criterion = nn.CrossEntropyLoss()
 
     # Learning rate scheduler
     num_training_steps = hyperparams['epochs'] * len(train_loader)
@@ -480,7 +521,7 @@ def train_and_evaluate(model_name, hyperparams):
     fig.savefig(f"../plots/{model_name}_confusion_matrix.png")
     plt.close()
     
-    # 3. ROC curve (test set) if binary classification
+    # 3. ROC curve (test set) - only if binary classification
     if num_classes == 2:
         fig = plot_roc_curve(final_test_targets, final_test_preds, title=f'ROC Curve (Test) - {model_name}')
         fig.savefig(f"../plots/{model_name}_roc_curve.png")
@@ -503,79 +544,192 @@ hyperparameter_configs = [
         'batch_size': 32,
         'epochs': 50,
         'patience': 10
+    },
+    {
+        'name': 'larger_model',
+        'hidden_channels': 128,
+        'num_layers': 3,
+        'num_timesteps': 3,
+        'dropout': 0.1,
+        'learning_rate': 0.0005,
+        'weight_decay': 1e-4,
+        'batch_size': 32,
+        'epochs': 50,
+        'patience': 10
+    },
+    {
+        'name': 'deeper_model',
+        'hidden_channels': 64,
+        'num_layers': 4,
+        'num_timesteps': 4,
+        'dropout': 0.3,
+        'learning_rate': 0.0005,
+        'weight_decay': 1e-4,
+        'batch_size': 32,
+        'epochs': 50,
+        'patience': 10
     }
 ]
 
 if __name__ == "__main__":
+    # Create directories for saving results
+    os.makedirs("../models", exist_ok=True)
+    os.makedirs("../plots", exist_ok=True)
+    
     all_datasets = [f for f in os.listdir(DATA_DIR) if isfile(join(DATA_DIR, f))]
     all_results = []
+    
     for dataset_name in all_datasets:
         filename = Path(dataset_name)
         model_name = filename.name.removesuffix("".join(filename.suffixes))
 
-        # Run training and evaluation for each dataset
-        print(f"\n========= Processing Dataset: {model_name} =========")
+        # Try different hyperparameter configurations
+        dataset_results = []
+        best_model = None
+        best_config = None
+        best_f1 = -float('inf')  # Initialize with worst possible value for F1 score
 
-        # Use the baseline configuration for all datasets
-        config = hyperparameter_configs[0]
-        metrics = train_and_evaluate(model_name, config)
+        for config in hyperparameter_configs:
+            print(f"\n=== Training with configuration: {config['name']} ===")
+            metrics, trained_model = train_and_evaluate(model_name, config)
 
-        if metrics:
-            all_results.append(
-                {
+            if metrics:
+                # Store results for comparison
+                result = {
                     "dataset": model_name,
+                    "config_name": config["name"],
                     "accuracy": metrics["accuracy"],
                     "precision": metrics["precision"],
                     "recall": metrics["recall"],
                     "f1": metrics["f1"],
-                    "auc": metrics["auc"],
+                    "auc": metrics.get("auc", 0)  # AUC might not be present for multiclass
                 }
-            )
+                
+                dataset_results.append(result)
+                all_results.append(result)
+                
+                # Check if this is the best model so far (using F1 as primary metric)
+                if metrics["f1"] > best_f1:
+                    best_f1 = metrics["f1"]
+                    best_model = trained_model
+                    best_config = config
 
-    # At the end of the file, after processing all datasets
+        # Print comparison of results for this dataset
+        if dataset_results:
+            print(f"\n=== Results for {model_name} ===")
+            results_df = pd.DataFrame(dataset_results)
+            print(results_df)
+
+            # Plot comparison
+            plt.figure(figsize=(15, 8))
+
+            plt.subplot(2, 2, 1)
+            sns.barplot(x="config_name", y="accuracy", data=results_df)
+            plt.title("Accuracy")
+
+            plt.subplot(2, 2, 2)
+            sns.barplot(x="config_name", y="precision", data=results_df)
+            plt.title("Precision")
+
+            plt.subplot(2, 2, 3)
+            sns.barplot(x="config_name", y="recall", data=results_df)
+            plt.title("Recall")
+
+            plt.subplot(2, 2, 4)
+            sns.barplot(x="config_name", y="f1", data=results_df)
+            plt.title("F1 Score")
+
+            plt.tight_layout()
+            plt.savefig(f"../plots/{model_name}_hyperparameter_comparison.png")
+            plt.close()
+
+            # If we found a best model
+            if best_model is not None and best_config is not None:
+                best_config_name = best_config['name']
+                best_idx = next(i for i, r in enumerate(dataset_results) if r["config_name"] == best_config_name)
+                best_metrics = {
+                    "accuracy": dataset_results[best_idx]["accuracy"],
+                    "precision": dataset_results[best_idx]["precision"],
+                    "recall": dataset_results[best_idx]["recall"],
+                    "f1": dataset_results[best_idx]["f1"],
+                    "auc": dataset_results[best_idx]["auc"]
+                }
+                
+                # Add best model information
+                print("\n=== Best Model ===")
+                print(f"Configuration: {best_config_name}")
+                print(f"Accuracy: {best_metrics['accuracy']:.4f}")
+                print(f"Precision: {best_metrics['precision']:.4f}")
+                print(f"Recall: {best_metrics['recall']:.4f}")
+                print(f"F1 Score: {best_metrics['f1']:.4f}")
+                if best_metrics['auc'] > 0:
+                    print(f"AUC: {best_metrics['auc']:.4f}")
+                    
+                print("Hyperparameters:")
+                for key, value in best_config.items():
+                    if key != 'name':
+                        print(f"  {key}: {value}")
+
+                # Save only the best model with its hyperparameters
+                best_model_path = f"../models/{model_name}_attentivefp_best.pt"
+                torch.save({
+                    'model_state_dict': best_model.state_dict(),
+                    'hyperparameters': best_config
+                }, best_model_path)
+                print(f"Best model saved to {best_model_path}")
+                
+                # Save best model info to CSV
+                best_model_info = {
+                    'metric': ['Dataset', 'Accuracy', 'Precision', 'Recall', 'F1 Score', 'AUC'] + list(best_config.keys()),
+                    'value': [model_name, best_metrics['accuracy'], best_metrics['precision'], 
+                             best_metrics['recall'], best_metrics['f1'], best_metrics['auc']] + list(best_config.values())
+                }
+                best_model_df = pd.DataFrame(best_model_info)
+                
+                # Save to CSV
+                with open(f"../models/{model_name}_best_model_info.csv", 'w') as f:
+                    f.write("=== Best Model ===\n")
+                    best_model_df.to_csv(f, index=False)
+
+    # After processing all datasets, create an overall summary
     if all_results:
-        results_df = pd.DataFrame(all_results)
-        print("\n=== Summary of Results ===")
-        print(results_df)
+        # Create a DataFrame with all results
+        all_results_df = pd.DataFrame(all_results)
         
-        # Save summary to CSV
-        results_df.to_csv("../models/classification_results_summary.csv", index=False)
+        # Save all results to CSV
+        all_results_df.to_csv("../models/classification_all_results.csv", index=False)
         
-        # For each dataset, find the best model (only one configuration in this case)
-        for dataset in results_df['dataset'].unique():
-            dataset_row = results_df[results_df['dataset'] == dataset].iloc[0]
+        # Create a summary of best models for each dataset
+        best_models_summary = []
+        for dataset in all_results_df['dataset'].unique():
+            dataset_results = all_results_df[all_results_df['dataset'] == dataset]
+            best_idx = dataset_results['f1'].idxmax()
+            best_row = dataset_results.loc[best_idx]
             
-            # Use F1 score as the primary metric for classification
-            best_f1 = dataset_row['f1']
-            best_accuracy = dataset_row['accuracy']
-            best_auc = dataset_row['auc']
-            
-            # Get the hyperparameters (same for all datasets in this case)
-            best_hyperparams = hyperparameter_configs[0]
-            
-            # Save best model info to CSV
-            best_model_info = {
-                'metric': ['Dataset', 'Accuracy', 'F1 Score', 'AUC'] + list(best_hyperparams.keys()),
-                'value': [dataset, best_accuracy, best_f1, best_auc] + list(best_hyperparams.values())
-            }
-            best_model_df = pd.DataFrame(best_model_info)
-            
-            # Save to CSV
-            with open(f"../models/{dataset}_best_model_info.csv", 'w') as f:
-                f.write("=== Best Model ===\n")
-                best_model_df.to_csv(f, index=False)
-            
-            print(f"\n=== Best Model for {dataset} ===")
-            print(f"Accuracy: {best_accuracy:.4f}, F1 Score: {best_f1:.4f}, AUC: {best_auc:.4f}")
+            best_models_summary.append({
+                'dataset': best_row['dataset'],
+                'best_config': best_row['config_name'],
+                'accuracy': best_row['accuracy'],
+                'precision': best_row['precision'],
+                'recall': best_row['recall'],
+                'f1': best_row['f1'],
+                'auc': best_row['auc']
+            })
         
-        # Plot summary of metrics across datasets
+        best_models_df = pd.DataFrame(best_models_summary)
+        best_models_df.to_csv("../models/classification_best_models_summary.csv", index=False)
+        
+        print("\n=== Best Models Summary ===")
+        print(best_models_df)
+        
+        # Plot summary of best models across datasets
         plt.figure(figsize=(15, 8))
         
         metrics = ["accuracy", "precision", "recall", "f1", "auc"]
         
         for i, metric in enumerate(metrics):
             plt.subplot(1, len(metrics), i + 1)
-            sns.barplot(x="dataset", y=metric, data=results_df)
+            sns.barplot(x="dataset", y=metric, data=best_models_df)
             plt.title(f"{metric.capitalize()}")
             plt.xticks(rotation=90)
             plt.ylim(0, 1)
@@ -583,24 +737,3 @@ if __name__ == "__main__":
         plt.tight_layout()
         plt.savefig("../plots/classification_summary.png")
         plt.close()
-        
-        # Create a summary of best models
-        best_models_summary = []
-        for dataset in results_df['dataset'].unique():
-            dataset_row = results_df[results_df['dataset'] == dataset].iloc[0]
-            best_models_summary.append({
-                'dataset': dataset,
-                'accuracy': dataset_row['accuracy'],
-                'f1': dataset_row['f1'],
-                'auc': dataset_row['auc'],
-                'model': 'AttentiveFP',
-                'hidden_channels': best_hyperparams['hidden_channels'],
-                'num_layers': best_hyperparams['num_layers'],
-                'num_timesteps': best_hyperparams['num_timesteps'],
-                'learning_rate': best_hyperparams['learning_rate']
-            })
-        
-        best_models_df = pd.DataFrame(best_models_summary)
-        best_models_df.to_csv("../models/classification_best_models_summary.csv", index=False)
-        print("\n=== Best Models Summary ===")
-        print(best_models_df)
