@@ -1,0 +1,18 @@
+=== Best Model ===
+metric,value
+Dataset,Endocrine_Disruption_NR-aromatase
+Accuracy,0.7819614711033275
+Precision,0.14232209737827714
+Recall,0.6551724137931034
+F1 Score,0.23384615384615384
+AUC,0.7965230945412902
+name,baseline
+hidden_channels,64
+num_layers,2
+num_timesteps,2
+dropout,0.2
+learning_rate,0.001
+weight_decay,1e-05
+batch_size,32
+epochs,50
+patience,10
