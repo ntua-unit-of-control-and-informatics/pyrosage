@@ -165,49 +165,38 @@ def generate_morgan_fingerprints(smiles):
     return list(AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=1024))
 
 class MoleculeDataset(Dataset):
-    def __init__(self, df, smiles_col, target_col):
+    def __init__(self, df, smiles_col="smiles", target_col="active"):
         super().__init__()
         self.df = df
         self.smiles_col = smiles_col
         self.target_col = target_col
         self.data_list = self._prepare_data()
 
-    # Add this method to fix the error
-    def __len__(self):
-        return len(self.data_list)
-    
-    # Make sure you also have a __getitem__ method
-    def __getitem__(self, idx):
-        return self.data_list[idx]
-        
     def _prepare_data(self):
         data_list = []
-        skipped_invalid_smiles = 0
-        skipped_no_bonds = 0
-
         for idx, row in self.df.iterrows():
             mol = Chem.MolFromSmiles(row[self.smiles_col])
             if mol is None:
-                skipped_invalid_smiles += 1
                 continue
 
-            # Enhanced atom features
+            # Get node features
+            num_atoms = mol.GetNumAtoms()
             atom_features = []
             for atom in mol.GetAtoms():
-                features = [
-                    atom.GetAtomicNum(),
-                    atom.GetTotalDegree(),
-                    atom.GetFormalCharge(),
-                    atom.GetTotalNumHs(),
-                    atom.GetNumRadicalElectrons(),
-                    int(atom.GetIsAromatic()),
-                    int(atom.IsInRing()),
-                ]
-                atom_features.append(features)
-
+                atom_features.append(
+                    [
+                        atom.GetAtomicNum(),
+                        atom.GetDegree(),
+                        atom.GetFormalCharge(),
+                        atom.GetNumRadicalElectrons(),
+                        atom.GetHybridization(),
+                        atom.GetIsAromatic(),
+                        atom.GetTotalNumHs(),
+                    ]
+                )
             x = torch.tensor(atom_features, dtype=torch.float)
 
-            # Enhanced bond features
+            # Get edge indices and features
             edges_list = []
             edge_features = []
             for bond in mol.GetBonds():
@@ -215,15 +204,16 @@ class MoleculeDataset(Dataset):
                 j = bond.GetEndAtomIdx()
                 edges_list.extend([[i, j], [j, i]])
 
+                # Bond features
+                bond_type = bond.GetBondType()
                 features = [
-                    int(bond.GetIsConjugated()),
-                    int(bond.IsInRing())
+                    bond_type == Chem.rdchem.BondType.SINGLE,
+                    bond_type == Chem.rdchem.BondType.DOUBLE,
+                    bond_type == Chem.rdchem.BondType.TRIPLE,
+                    bond_type == Chem.rdchem.BondType.AROMATIC,
+                    bond.GetIsConjugated(),
                 ]
                 edge_features.extend([features, features])
-
-            if not edges_list:  # Skip molecules with no bonds
-                skipped_no_bonds += 1
-                continue
 
             edge_index = torch.tensor(edges_list, dtype=torch.long).t()
             edge_attr = torch.tensor(edge_features, dtype=torch.float)
@@ -233,66 +223,82 @@ class MoleculeDataset(Dataset):
                 x=x,
                 edge_index=edge_index,
                 edge_attr=edge_attr,
-                y=torch.tensor([float(row[self.target_col])], dtype=torch.float),
+                y=torch.tensor([row[self.target_col]], dtype=torch.float),
             )
             data_list.append(data)
-
-        if skipped_invalid_smiles > 0:
-            print(f"Skipped {skipped_invalid_smiles} molecules due to invalid SMILES")
-        if skipped_no_bonds > 0:
-            print(f"Skipped {skipped_no_bonds} molecules with no bonds")
-
         return data_list
 
-def train_epoch(model, loader, optimizer, criterion, device, scheduler=None):
+    def len(self):
+        return len(self.data_list)
+
+    def get(self, idx):
+        return self.data_list[idx]
+
+
+def train_epoch(
+    model, train_loader, val_loader, optimizer, criterion, device, scheduler=None
+):
     """Train model for one epoch"""
     model.train()
     total_loss = 0
     all_predictions = []
     all_targets = []
-    
-    for batch in loader:
+
+    for batch in train_loader:
         batch = batch.to(device)
         optimizer.zero_grad()
-        
+
         out = model(batch.x, batch.edge_index, batch.edge_attr, batch=batch.batch)
-        out = out.squeeze()
-        target = batch.y.squeeze()
-        
-        loss = criterion(out, target)
+
+        # Make sure both have the right shape
+        out_squeezed = out.squeeze(-1)  # Remove last dimension if it's 1
+        target = batch.y.squeeze(-1)  # Remove last dimension if it's 1
+
+        # Handle case where batch size is 1
+        if out_squeezed.dim() == 0:
+            out_squeezed = out_squeezed.unsqueeze(0)
+        if target.dim() == 0:
+            target = target.unsqueeze(0)
+
+        loss = criterion(out_squeezed, target)
         loss.backward()
-        
+
         # Gradient clipping
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        
+
         optimizer.step()
-        if scheduler is not None:
-            scheduler.step()
-        
+
         # Store predictions and targets
         with torch.no_grad():
             probs = torch.sigmoid(out)
             all_predictions.extend(probs.cpu().numpy())
-            all_targets.extend(target.cpu().numpy())
-        
+            all_targets.extend(batch.y.cpu().numpy())
+
         total_loss += loss.item() * batch.num_graphs
-    
-    epoch_loss = total_loss / len(loader.dataset)
+
+    # Validation for scheduler - make sure it gets a dictionary
+    val_metrics, _, _ = evaluate(model, val_loader, criterion, device)
+
+    if scheduler is not None:
+        scheduler.step(val_metrics["loss"])
+
+    epoch_loss = total_loss / len(train_loader.dataset)
     all_predictions = np.array(all_predictions)
     all_targets = np.array(all_targets)
-    
+
     # Calculate metrics
     binary_preds = (all_predictions > 0.5).astype(int)
     metrics = {
-        'loss': epoch_loss,
-        'accuracy': accuracy_score(all_targets, binary_preds),
-        'precision': precision_score(all_targets, binary_preds, zero_division=0),
-        'recall': recall_score(all_targets, binary_preds, zero_division=0),
-        'f1': f1_score(all_targets, binary_preds, zero_division=0),
-        'auc': roc_auc_score(all_targets, all_predictions)
+        "loss": epoch_loss,
+        "accuracy": accuracy_score(all_targets, binary_preds),
+        "precision": precision_score(all_targets, binary_preds, zero_division=0),
+        "recall": recall_score(all_targets, binary_preds, zero_division=0),
+        "f1": f1_score(all_targets, binary_preds, zero_division=0),
+        "auc": roc_auc_score(all_targets, all_predictions),
     }
-    
+
     return metrics, all_predictions, all_targets
+
 
 def evaluate(model, loader, criterion, device):
     """Evaluate model on a data loader"""
@@ -300,41 +306,48 @@ def evaluate(model, loader, criterion, device):
     total_loss = 0
     all_predictions = []
     all_targets = []
-    
+
     with torch.no_grad():
         for batch in loader:
             batch = batch.to(device)
-            out = model(
-                batch.x, batch.edge_index, batch.edge_attr,
-                batch=batch.batch
-            )
-            out = out.squeeze()
-            target = batch.y.squeeze()
-            loss = criterion(out, target)
-            
+            out = model(batch.x, batch.edge_index, batch.edge_attr, batch=batch.batch)
+
+            # Make sure both have the right shape before computing loss
+            out_squeezed = out.squeeze(-1)  # Remove last dimension if it's 1
+            target = batch.y.squeeze(-1)  # Remove last dimension if it's 1
+
+            # Handle case where batch size is 1
+            if out_squeezed.dim() == 0:
+                out_squeezed = out_squeezed.unsqueeze(0)
+            if target.dim() == 0:
+                target = target.unsqueeze(0)
+
+            loss = criterion(out_squeezed, target)
+
             # Store predictions and targets
             probs = torch.sigmoid(out)
             all_predictions.extend(probs.cpu().numpy())
-            all_targets.extend(target.cpu().numpy())
-            
+            all_targets.extend(batch.y.cpu().numpy())
+
             total_loss += loss.item() * batch.num_graphs
-    
+
     epoch_loss = total_loss / len(loader.dataset)
     all_predictions = np.array(all_predictions)
     all_targets = np.array(all_targets)
-    
+
     # Calculate metrics
     binary_preds = (all_predictions > 0.5).astype(int)
     metrics = {
-        'loss': epoch_loss,
-        'accuracy': accuracy_score(all_targets, binary_preds),
-        'precision': precision_score(all_targets, binary_preds, zero_division=0),
-        'recall': recall_score(all_targets, binary_preds, zero_division=0),
-        'f1': f1_score(all_targets, binary_preds, zero_division=0),
-        'auc': roc_auc_score(all_targets, all_predictions)
+        "loss": epoch_loss,
+        "accuracy": accuracy_score(all_targets, binary_preds),
+        "precision": precision_score(all_targets, binary_preds, zero_division=0),
+        "recall": recall_score(all_targets, binary_preds, zero_division=0),
+        "f1": f1_score(all_targets, binary_preds, zero_division=0),
+        "auc": roc_auc_score(all_targets, all_predictions),
     }
-    
+
     return metrics, all_predictions, all_targets
+
 
 def train_and_evaluate(model_name, hyperparams):
     """Train and evaluate model with given hyperparameters"""
@@ -456,7 +469,7 @@ def train_and_evaluate(model_name, hyperparams):
         in_channels=7,
         hidden_channels=hyperparams['hidden_channels'],
         out_channels=1,
-        edge_dim=2,  # Change to match your actual bond features
+        edge_dim=5,  # Change to match your actual bond features
         num_layers=hyperparams['num_layers'],
         num_timesteps=hyperparams['num_timesteps'],
         dropout=hyperparams['dropout']
@@ -512,21 +525,11 @@ def train_and_evaluate(model_name, hyperparams):
     num_training_steps = hyperparams['epochs'] * len(train_loader) if len(train_loader) > 0 else hyperparams['epochs']
     num_warmup_steps = num_training_steps // 10 if num_training_steps > 0 else 0
     
-    if len(train_loader) == 0: # Handle empty train_loader for scheduler
-         scheduler = None
-    else:
-        def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps):
-            def lr_lambda(current_step):
-                if num_training_steps == 0 : return 1.0 # Avoid division by zero
-                if current_step < num_warmup_steps:
-                    return float(current_step) / float(max(1, num_warmup_steps))
-                progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
-                return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
-            return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-        scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps)
 
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=5
+    )
 
-    
     # Training history
     history = defaultdict(list)
 
@@ -541,8 +544,9 @@ def train_and_evaluate(model_name, hyperparams):
         else:
             # Training
             train_metrics, train_preds, train_targets = train_epoch(
-                model, train_loader, optimizer, criterion, device, scheduler
+                model, train_loader, val_loader, optimizer, criterion, device
             )
+
             for k, v in train_metrics.items():
                 history[f'train_{k}'].append(v)
         
