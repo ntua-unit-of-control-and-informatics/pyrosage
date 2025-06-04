@@ -235,58 +235,47 @@ class MoleculeDataset(Dataset):
         return self.data_list[idx]
 
 
-def train_epoch(model, train_loader, val_loader, optimizer, criterion, device, scheduler=None):
-    """Train model for one epoch"""
+def train_epoch(model, loader, optimizer, criterion, device):
     model.train()
     total_loss = 0
-    all_predictions = []
-    all_targets = []
+    predictions = []
+    targets = []
     
-    for batch in train_loader:
+    for batch in loader:
         batch = batch.to(device)
         optimizer.zero_grad()
         
-        out = model(batch.x, batch.edge_index, batch.edge_attr, batch=batch.batch)
-        out = out.squeeze()
-        target = batch.y.squeeze()
+        out = model(
+            batch.x, batch.edge_index, batch.edge_attr, batch.batch
+        )
         
-        loss = criterion(out, target)
+        target = batch.y
+        
+        loss = criterion(out.squeeze(-1), target)
         loss.backward()
-        
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        
         optimizer.step()
-        # Validation
-        val_metrics = evaluate(model, val_loader, criterion, device)
-
-        if scheduler is not None:
-            scheduler.step(val_metrics['loss'])
-        
-        # Store predictions and targets
-        with torch.no_grad():
-            probs = torch.sigmoid(out)
-            all_predictions.extend(probs.cpu().numpy())
-            all_targets.extend(target.cpu().numpy())
         
         total_loss += loss.item() * batch.num_graphs
+        predictions.extend(out.detach().cpu().numpy())
+        targets.extend(batch.y.cpu().numpy())
     
-    epoch_loss = total_loss / len(train_loader.dataset)
-    all_predictions = np.array(all_predictions)
-    all_targets = np.array(all_targets)
+    # Return a dictionary instead of a tuple
+    epoch_loss = total_loss / len(loader.dataset)
+    all_predictions = np.array(predictions)
+    all_targets = np.array(targets)
     
     # Calculate metrics
-    binary_preds = (all_predictions > 0.5).astype(int)
+    binary_preds = (torch.sigmoid(torch.tensor(all_predictions)) > 0.5).numpy()
     metrics = {
         'loss': epoch_loss,
         'accuracy': accuracy_score(all_targets, binary_preds),
         'precision': precision_score(all_targets, binary_preds, zero_division=0),
         'recall': recall_score(all_targets, binary_preds, zero_division=0),
         'f1': f1_score(all_targets, binary_preds, zero_division=0),
-        'auc': roc_auc_score(all_targets, all_predictions)
+        'auc': roc_auc_score(all_targets, all_predictions.squeeze())
     }
     
-    return metrics, all_predictions, all_targets
+    return metrics
 
 def evaluate(model, loader, criterion, device):
     """Evaluate model on a data loader"""
@@ -524,8 +513,8 @@ def train_and_evaluate(model_name, hyperparams):
             # Still run validation and test
         else:
             # Training
-            train_metrics, train_preds, train_targets = train_epoch(
-                model, train_loader, val_loader, optimizer, criterion, device, scheduler
+            train_metrics = train_epoch(
+                model, train_loader, optimizer, criterion, device
             )
             for k, v in train_metrics.items():
                 history[f'train_{k}'].append(v)
