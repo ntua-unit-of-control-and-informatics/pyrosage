@@ -543,9 +543,10 @@ def train_and_evaluate(model_name, hyperparams):
             # Still run validation and test
         else:
             # Training
-            train_metrics = train_epoch(
+            train_metrics, train_preds, train_targets = train_epoch(
                 model, train_loader, val_loader, optimizer, criterion, device
             )
+
             for k, v in train_metrics.items():
                 history[f'train_{k}'].append(v)
         
