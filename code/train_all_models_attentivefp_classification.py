@@ -544,7 +544,7 @@ def train_and_evaluate(model_name, hyperparams):
         else:
             # Training
             train_metrics = train_epoch(
-                model, train_loader, optimizer, criterion, device
+                model, train_loader, val_loader, optimizer, criterion, device
             )
             for k, v in train_metrics.items():
                 history[f'train_{k}'].append(v)
