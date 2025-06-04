@@ -235,47 +235,70 @@ class MoleculeDataset(Dataset):
         return self.data_list[idx]
 
 
-def train_epoch(model, loader, optimizer, criterion, device):
+def train_epoch(
+    model, train_loader, val_loader, optimizer, criterion, device, scheduler=None
+):
+    """Train model for one epoch"""
     model.train()
     total_loss = 0
-    predictions = []
-    targets = []
-    
-    for batch in loader:
+    all_predictions = []
+    all_targets = []
+
+    for batch in train_loader:
         batch = batch.to(device)
         optimizer.zero_grad()
-        
-        out = model(
-            batch.x, batch.edge_index, batch.edge_attr, batch.batch
-        )
-        
-        target = batch.y
-        
-        loss = criterion(out.squeeze(-1), target)
+
+        out = model(batch.x, batch.edge_index, batch.edge_attr, batch=batch.batch)
+
+        # Make sure both have the right shape
+        out_squeezed = out.squeeze(-1)  # Remove last dimension if it's 1
+        target = batch.y.squeeze(-1)  # Remove last dimension if it's 1
+
+        # Handle case where batch size is 1
+        if out_squeezed.dim() == 0:
+            out_squeezed = out_squeezed.unsqueeze(0)
+        if target.dim() == 0:
+            target = target.unsqueeze(0)
+
+        loss = criterion(out_squeezed, target)
         loss.backward()
+
+        # Gradient clipping
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
         optimizer.step()
-        
+
+        # Store predictions and targets
+        with torch.no_grad():
+            probs = torch.sigmoid(out)
+            all_predictions.extend(probs.cpu().numpy())
+            all_targets.extend(batch.y.cpu().numpy())
+
         total_loss += loss.item() * batch.num_graphs
-        predictions.extend(out.detach().cpu().numpy())
-        targets.extend(batch.y.cpu().numpy())
-    
-    # Return a dictionary instead of a tuple
-    epoch_loss = total_loss / len(loader.dataset)
-    all_predictions = np.array(predictions)
-    all_targets = np.array(targets)
-    
+
+    # Validation for scheduler - make sure it gets a dictionary
+    val_metrics, _, _ = evaluate(model, val_loader, criterion, device)
+
+    if scheduler is not None:
+        scheduler.step(val_metrics["loss"])
+
+    epoch_loss = total_loss / len(train_loader.dataset)
+    all_predictions = np.array(all_predictions)
+    all_targets = np.array(all_targets)
+
     # Calculate metrics
-    binary_preds = (torch.sigmoid(torch.tensor(all_predictions)) > 0.5).numpy()
+    binary_preds = (all_predictions > 0.5).astype(int)
     metrics = {
-        'loss': epoch_loss,
-        'accuracy': accuracy_score(all_targets, binary_preds),
-        'precision': precision_score(all_targets, binary_preds, zero_division=0),
-        'recall': recall_score(all_targets, binary_preds, zero_division=0),
-        'f1': f1_score(all_targets, binary_preds, zero_division=0),
-        'auc': roc_auc_score(all_targets, all_predictions.squeeze())
+        "loss": epoch_loss,
+        "accuracy": accuracy_score(all_targets, binary_preds),
+        "precision": precision_score(all_targets, binary_preds, zero_division=0),
+        "recall": recall_score(all_targets, binary_preds, zero_division=0),
+        "f1": f1_score(all_targets, binary_preds, zero_division=0),
+        "auc": roc_auc_score(all_targets, all_predictions),
     }
-    
-    return metrics
+
+    return metrics, all_predictions, all_targets
+
 
 def evaluate(model, loader, criterion, device):
     """Evaluate model on a data loader"""
@@ -283,41 +306,48 @@ def evaluate(model, loader, criterion, device):
     total_loss = 0
     all_predictions = []
     all_targets = []
-    
+
     with torch.no_grad():
         for batch in loader:
             batch = batch.to(device)
-            out = model(
-                batch.x, batch.edge_index, batch.edge_attr,
-                batch=batch.batch
-            )
-            out = out.squeeze()
-            target = batch.y.squeeze()
-            loss = criterion(out, target)
-            
+            out = model(batch.x, batch.edge_index, batch.edge_attr, batch=batch.batch)
+
+            # Make sure both have the right shape before computing loss
+            out_squeezed = out.squeeze(-1)  # Remove last dimension if it's 1
+            target = batch.y.squeeze(-1)  # Remove last dimension if it's 1
+
+            # Handle case where batch size is 1
+            if out_squeezed.dim() == 0:
+                out_squeezed = out_squeezed.unsqueeze(0)
+            if target.dim() == 0:
+                target = target.unsqueeze(0)
+
+            loss = criterion(out_squeezed, target)
+
             # Store predictions and targets
             probs = torch.sigmoid(out)
             all_predictions.extend(probs.cpu().numpy())
-            all_targets.extend(target.cpu().numpy())
-            
+            all_targets.extend(batch.y.cpu().numpy())
+
             total_loss += loss.item() * batch.num_graphs
-    
+
     epoch_loss = total_loss / len(loader.dataset)
     all_predictions = np.array(all_predictions)
     all_targets = np.array(all_targets)
-    
+
     # Calculate metrics
     binary_preds = (all_predictions > 0.5).astype(int)
     metrics = {
-        'loss': epoch_loss,
-        'accuracy': accuracy_score(all_targets, binary_preds),
-        'precision': precision_score(all_targets, binary_preds, zero_division=0),
-        'recall': recall_score(all_targets, binary_preds, zero_division=0),
-        'f1': f1_score(all_targets, binary_preds, zero_division=0),
-        'auc': roc_auc_score(all_targets, all_predictions)
+        "loss": epoch_loss,
+        "accuracy": accuracy_score(all_targets, binary_preds),
+        "precision": precision_score(all_targets, binary_preds, zero_division=0),
+        "recall": recall_score(all_targets, binary_preds, zero_division=0),
+        "f1": f1_score(all_targets, binary_preds, zero_division=0),
+        "auc": roc_auc_score(all_targets, all_predictions),
     }
-    
+
     return metrics, all_predictions, all_targets
+
 
 def train_and_evaluate(model_name, hyperparams):
     """Train and evaluate model with given hyperparameters"""
