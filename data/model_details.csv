@@ -19,3 +19,7 @@ LC50,5,3,200,../models/models_LC50.pt
 AMES,5,3,200,../models/models_AMES.pt
 Irritation_Corrosion_Eye_Corrosion_geometric,5,3,200,../models/models_Irritation_Corrosion_Eye_Corrosion_geometric.pt
 Irritation_Corrosion_Eye_Irritation_geometric,5,3,200,../models/models_model_Irritation_Corrosion_Eye_Irritation_geometric.pt
+Endocrine_Disruption_NR-AhR.csv
+Endocrine_Disruption_NR-AR.csv
+Endocrine_Disruption_NR-aromatase.csv
+Endocrine_Disruption_NR-ER.csv
