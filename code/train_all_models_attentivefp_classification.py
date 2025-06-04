@@ -235,14 +235,14 @@ class MoleculeDataset(Dataset):
         return self.data_list[idx]
 
 
-def train_epoch(model, loader, optimizer, criterion, device, scheduler=None):
+def train_epoch(model, train_loader, val_loader, optimizer, criterion, device, scheduler=None):
     """Train model for one epoch"""
     model.train()
     total_loss = 0
     all_predictions = []
     all_targets = []
     
-    for batch in loader:
+    for batch in train_loader:
         batch = batch.to(device)
         optimizer.zero_grad()
         
@@ -257,8 +257,11 @@ def train_epoch(model, loader, optimizer, criterion, device, scheduler=None):
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         
         optimizer.step()
+        # Validation
+        val_metrics = evaluate(model, val_loader, criterion, device)
+
         if scheduler is not None:
-            scheduler.step()
+            scheduler.step(val_metrics['loss'])
         
         # Store predictions and targets
         with torch.no_grad():
@@ -268,7 +271,7 @@ def train_epoch(model, loader, optimizer, criterion, device, scheduler=None):
         
         total_loss += loss.item() * batch.num_graphs
     
-    epoch_loss = total_loss / len(loader.dataset)
+    epoch_loss = total_loss / len(train_loader.dataset)
     all_predictions = np.array(all_predictions)
     all_targets = np.array(all_targets)
     
@@ -522,7 +525,7 @@ def train_and_evaluate(model_name, hyperparams):
         else:
             # Training
             train_metrics, train_preds, train_targets = train_epoch(
-                model, train_loader, optimizer, criterion, device, scheduler
+                model, train_loader, val_loader, optimizer, criterion, device, scheduler
             )
             for k, v in train_metrics.items():
                 history[f'train_{k}'].append(v)
