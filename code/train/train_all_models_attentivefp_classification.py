@@ -26,18 +26,20 @@ from rdkit.Chem import AllChem
 from rdkit import RDLogger
 from imblearn.over_sampling import SMOTE
 
+from code.train.molecule_dataset import MoleculeDataset
+
 # Suppress RDKit warnings
 RDLogger.DisableLog('rdApp.*')
 
-DATA_DIR = "../data/classification"
+DATA_DIR = "../../data/classification"
 
 # Set up device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
 # Create directories for saving results
-os.makedirs("../models", exist_ok=True)
-os.makedirs("../plots", exist_ok=True)
+os.makedirs("../../models/classification", exist_ok=True)
+os.makedirs("../../plots", exist_ok=True)
 
 # Define evaluation metrics and visualization functions
 
@@ -163,77 +165,6 @@ def generate_morgan_fingerprints(smiles):
     if mol is None:
         return None
     return list(AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=1024))
-
-class MoleculeDataset(Dataset):
-    def __init__(self, df, smiles_col="smiles", target_col="active"):
-        super().__init__()
-        self.df = df
-        self.smiles_col = smiles_col
-        self.target_col = target_col
-        self.data_list = self._prepare_data()
-
-    def _prepare_data(self):
-        data_list = []
-        for idx, row in self.df.iterrows():
-            mol = Chem.MolFromSmiles(row[self.smiles_col])
-            if mol is None:
-                continue
-
-            # Get node features
-            num_atoms = mol.GetNumAtoms()
-            atom_features = []
-            for atom in mol.GetAtoms():
-                atom_features.append(
-                    [
-                        atom.GetAtomicNum(),
-                        atom.GetDegree(),
-                        atom.GetFormalCharge(),
-                        atom.GetNumRadicalElectrons(),
-                        atom.GetHybridization(),
-                        atom.GetIsAromatic(),
-                        atom.GetTotalNumHs(),
-                    ]
-                )
-            x = torch.tensor(atom_features, dtype=torch.float)
-
-            # Get edge indices and features
-            edges_list = []
-            edge_features = []
-            for bond in mol.GetBonds():
-                i = bond.GetBeginAtomIdx()
-                j = bond.GetEndAtomIdx()
-                edges_list.extend([[i, j], [j, i]])
-
-                # Bond features
-                bond_type = bond.GetBondType()
-                features = [
-                    bond_type == Chem.rdchem.BondType.SINGLE,
-                    bond_type == Chem.rdchem.BondType.DOUBLE,
-                    bond_type == Chem.rdchem.BondType.TRIPLE,
-                    bond_type == Chem.rdchem.BondType.AROMATIC,
-                    bond.GetIsConjugated(),
-                ]
-                edge_features.extend([features, features])
-
-            edge_index = torch.tensor(edges_list, dtype=torch.long).t()
-            edge_attr = torch.tensor(edge_features, dtype=torch.float)
-
-            # Create PyG Data object
-            data = Data(
-                x=x,
-                edge_index=edge_index,
-                edge_attr=edge_attr,
-                y=torch.tensor([row[self.target_col]], dtype=torch.float),
-            )
-            data_list.append(data)
-        return data_list
-
-    def len(self):
-        return len(self.data_list)
-
-    def get(self, idx):
-        return self.data_list[idx]
-
 
 def train_epoch(
     model, train_loader, val_loader, optimizer, criterion, device, scheduler=None
@@ -466,10 +397,10 @@ def train_and_evaluate(model_name, hyperparams):
         print("Using loss for early stopping")
     
     model = AttentiveFP(
-        in_channels=7,
+        in_channels=10,
         hidden_channels=hyperparams['hidden_channels'],
         out_channels=1,
-        edge_dim=5,  # Change to match your actual bond features
+        edge_dim=6,
         num_layers=hyperparams['num_layers'],
         num_timesteps=hyperparams['num_timesteps'],
         dropout=hyperparams['dropout']
@@ -692,8 +623,8 @@ hyperparameter_configs = [
 
 if __name__ == "__main__":
     # Create directories for saving results
-    os.makedirs("../models", exist_ok=True)
-    os.makedirs("../plots", exist_ok=True)
+    os.makedirs("../../models/classification", exist_ok=True)
+    os.makedirs("../../plots", exist_ok=True)
 
     all_datasets = [f for f in os.listdir(DATA_DIR) if isfile(join(DATA_DIR, f))]
     all_results = []
@@ -790,7 +721,7 @@ if __name__ == "__main__":
                         print(f"  {key}: {value}")
 
                 # Save only the best model with its hyperparameters
-                best_model_path = f"../models/{model_name}_attentivefp_best.pt"
+                best_model_path = f"../models/classification/{model_name}_attentivefp_best.pt"
                 torch.save({
                     'model_state_dict': best_model.state_dict(),
                     'hyperparameters': best_config
@@ -806,7 +737,7 @@ if __name__ == "__main__":
                 best_model_df = pd.DataFrame(best_model_info)
 
                 # Save to CSV
-                with open(f"../models/{model_name}_best_model_info.csv", 'w') as f:
+                with open(f"../models/classification/{model_name}_best_model_info.csv", 'w') as f:
                     f.write("=== Best Model ===\n")
                     best_model_df.to_csv(f, index=False)
 
@@ -816,7 +747,7 @@ if __name__ == "__main__":
         all_results_df = pd.DataFrame(all_results)
 
         # Save all results to CSV
-        all_results_df.to_csv("../models/classification_all_results.csv", index=False)
+        all_results_df.to_csv("../models/classification/classification_all_results.csv", index=False)
 
         # Create a summary of best models for each dataset
         best_models_summary = []
@@ -836,7 +767,7 @@ if __name__ == "__main__":
             })
 
         best_models_df = pd.DataFrame(best_models_summary)
-        best_models_df.to_csv("../models/classification_best_models_summary.csv", index=False)
+        best_models_df.to_csv("../models/classification/classification_best_models_summary.csv", index=False)
 
         print("\n=== Best Models Summary ===")
         print(best_models_df)
