@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 
 import pandas as pd
 import torch
@@ -40,6 +41,47 @@ class PyrosageModelUploader:
             pass
         return None
     
+    def get_endpoint_description(self, endpoint_name, model_type):
+        """Get detailed description for each endpoint"""
+        
+        descriptions = {
+            # Classification models
+            "AMES": "mutagenicity using the Ames test. Predicts whether a compound can cause mutations in bacterial DNA, which is an important indicator of potential carcinogenicity.",
+            "Endocrine_Disruption_NR-AR": "endocrine disruption via androgen receptor (AR). Predicts whether a compound can interfere with androgen hormone signaling, which affects reproductive health.",
+            "Endocrine_Disruption_NR-AhR": "endocrine disruption via aryl hydrocarbon receptor (AhR). Predicts whether a compound activates the AhR pathway, which is involved in toxicological responses.",
+            "Endocrine_Disruption_NR-ER": "endocrine disruption via estrogen receptor (ER). Predicts whether a compound can bind to and activate estrogen receptors, affecting hormonal balance.",
+            "Endocrine_Disruption_NR-aromatase": "endocrine disruption via aromatase inhibition. Predicts whether a compound can inhibit the aromatase enzyme, which converts androgens to estrogens.",
+            "Irritation_Corrosion_Eye_Corrosion": "eye corrosion potential. Predicts whether a compound can cause irreversible damage to eye tissue upon contact.",
+            "Irritation_Corrosion_Eye_Irritation": "eye irritation potential. Predicts whether a compound can cause reversible inflammatory responses in eye tissue.",
+            
+            # Regression models - Environmental & Physicochemical Properties
+            "KOA": "the octanol-air partition coefficient (log KOA). This property measures a compound's tendency to partition between octanol and air, indicating volatility and environmental transport potential.",
+            "KOC": "the organic carbon partition coefficient (log KOC). This property predicts soil adsorption behavior and is key for environmental mobility assessment.",
+            "KOW": "the octanol-water partition coefficient (log KOW/log P). This fundamental property indicates lipophilicity and affects bioaccumulation potential.",
+            "SW": "aqueous solubility (log SW). This property affects environmental fate, bioavailability, and exposure potential.",
+            "KH": "Henry's Law constant (log KH). This property relates water-air partitioning and is crucial for modeling volatilization from water bodies.",
+            "kAOH": "the reaction rate constant with hydroxyl radicals (log kAOH). This property relates to atmospheric degradation and environmental persistence.",
+            "FBA": "fugacity-based environmental fate parameter A. This property is used in fugacity models for environmental distribution prediction.",
+            "FBC": "fugacity-based environmental fate parameter C. This property is used in fugacity models for environmental distribution prediction.",
+            
+            # Regression models - Toxicity & Bioactivity
+            "LC50": "aquatic toxicity (log LC50). This property predicts the lethal concentration for 50% of aquatic organisms (fish, daphnia), crucial for ecological risk assessment.",
+            "LD50_Zhu": "acute oral toxicity (log LD50). This property predicts the lethal dose for 50% of test animals, important for mammalian toxicity assessment.",
+            "tbiodeg": "biodegradability potential. This property classifies whether a compound is readily biodegradable in the environment.",
+            "TBP": "teratogenic bioaccumulation potential. This property may relate to developmental toxicity or bioaccumulation scoring.",
+            "tfishbio": "fish bioaccumulation factor. This property measures accumulation in fish tissue, important for food chain modeling and ecological risk.",
+            "TMP": "toxicity-related molecular property. This endpoint represents an experimental toxicity measurement.",
+            
+            # Regression models - Acid/Base Behavior
+            "pKa_acidic": "the acid dissociation constant (pKa) for acidic groups. This property predicts the pH at which acidic functional groups donate protons, affecting ionization state and bioavailability.",
+            "pKa_basic": "the acid dissociation constant (pKa) for basic groups. This property predicts the pH at which basic functional groups accept protons, important for ADME properties.",
+            
+            # Others
+            "PLV": "plasma level volume or protein binding parameter. This property may relate to pharmacokinetics or blood partitioning behavior."
+        }
+        
+        return descriptions.get(endpoint_name, f"{endpoint_name} molecular property")
+    
     def create_model_card(self, endpoint_name, model_type, hyperparams, model_info=None):
         """
         Create a comprehensive model card for the AttentiveFP model
@@ -61,6 +103,7 @@ class PyrosageModelUploader:
         """
         
         task_type = "Binary Classification" if model_type == "classification" else "Regression"
+        endpoint_description = self.get_endpoint_description(endpoint_name, model_type)
         
         model_card = f"""---
 license: mit
@@ -80,7 +123,7 @@ pipeline_tag: {"text-classification" if model_type == "classification" else "tab
 
 ## Model Description
 
-This is an AttentiveFP (Attention-based Fingerprint) Graph Neural Network model trained for {endpoint_name} {task_type.lower()} from the Pyrosage project. The model predicts molecular properties directly from SMILES strings using graph neural networks.
+This is an AttentiveFP (Attention-based Fingerprint) Graph Neural Network model trained to predict {endpoint_description} The model takes SMILES strings as input and uses graph neural networks to predict molecular properties directly from the molecular structure.
 
 ## Model Details
 
@@ -452,9 +495,9 @@ numpy>=1.21.0
             "files_created": ["pytorch_model.pt", "README.md", "inference.py", "requirements.txt", "config.json"]
         }
     
-    def upload_model(self, model_path, endpoint_name, model_type, repo_name=None, private=False):
+    def upload_model(self, model_path, endpoint_name, model_type, repo_name=None, private=False, max_retries=3):
         """
-        Upload a single model to Hugging Face Hub
+        Upload a single model to Hugging Face Hub with retry logic
         
         Parameters:
         -----------
@@ -468,6 +511,8 @@ numpy>=1.21.0
             Custom repository name (optional)
         private: bool
             Whether to make the repository private
+        max_retries: int
+            Maximum number of retry attempts for rate limits
             
         Returns:
         --------
@@ -485,32 +530,46 @@ numpy>=1.21.0
         namespace = self.organization if self.organization else self.hf_username
         repo_id = f"{namespace}/{repo_name}"
         
-        try:
-            # Create repository
-            print(f"Creating repository: {repo_id}")
-            create_repo(repo_id, private=private, exist_ok=True)
-            
-            # Prepare files in temporary directory
-            with tempfile.TemporaryDirectory() as temp_dir:
-                print(f"Preparing model files for {endpoint_name}...")
-                file_info = self.prepare_model_files(model_path, endpoint_name, model_type, temp_dir)
+        for attempt in range(max_retries + 1):
+            try:
+                # Create repository
+                print(f"Creating repository: {repo_id}")
+                create_repo(repo_id, private=private, exist_ok=True)
                 
-                print(f"Uploading files to {repo_id}...")
-                # Upload the entire folder
-                upload_folder(
-                    folder_path=temp_dir,
-                    repo_id=repo_id,
-                    repo_type="model",
-                    commit_message=f"Upload {endpoint_name} AttentiveFP model"
-                )
-            
-            repo_url = f"https://huggingface.co/{repo_id}"
-            print(f"✅ Successfully uploaded model: {repo_url}")
-            return repo_url
-            
-        except Exception as e:
-            print(f"❌ Error uploading {endpoint_name}: {str(e)}")
-            return None
+                # Prepare files in temporary directory
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    print(f"Preparing model files for {endpoint_name}...")
+                    file_info = self.prepare_model_files(model_path, endpoint_name, model_type, temp_dir)
+                    
+                    print(f"Uploading files to {repo_id}...")
+                    # Upload the entire folder
+                    upload_folder(
+                        folder_path=temp_dir,
+                        repo_id=repo_id,
+                        repo_type="model",
+                        commit_message=f"Upload {endpoint_name} AttentiveFP model"
+                    )
+                
+                repo_url = f"https://huggingface.co/{repo_id}"
+                print(f"✅ Successfully uploaded model: {repo_url}")
+                return repo_url
+                
+            except Exception as e:
+                error_str = str(e)
+                if "429" in error_str or "Too Many Requests" in error_str:
+                    if attempt < max_retries:
+                        wait_time = (attempt + 1) * 30  # Progressive delay: 30s, 60s, 90s
+                        print(f"⏳ Rate limited. Waiting {wait_time}s before retry {attempt + 1}/{max_retries}...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        print(f"❌ Rate limit exceeded after {max_retries} retries for {endpoint_name}")
+                        return None
+                else:
+                    print(f"❌ Error uploading {endpoint_name}: {error_str}")
+                    return None
+        
+        return None
     
     def upload_all_classification_models(self, models_dir="../models/classification", private=False):
         """Upload all classification models"""
@@ -536,6 +595,55 @@ numpy>=1.21.0
             model_path = os.path.join(models_dir, model_file)
             
             print(f"\\n📤 Uploading {model_type} model: {endpoint_name}")
+            repo_url = self.upload_model(
+                model_path=model_path,
+                endpoint_name=endpoint_name,
+                model_type=model_type,
+                private=private
+            )
+            
+            results[endpoint_name] = repo_url
+        
+        return results
+    
+    def upload_missing_models(self, missing_models, model_type, models_dir, private=False):
+        """
+        Upload only specific missing models
+        
+        Parameters:
+        -----------
+        missing_models: list
+            List of model endpoint names that failed to upload
+        model_type: str
+            "classification" or "regression"
+        models_dir: str
+            Directory containing the model files
+        private: bool
+            Whether to make repositories private
+            
+        Returns:
+        --------
+        dict: Results of upload attempts
+        """
+        
+        if not os.path.exists(models_dir):
+            print(f"Models directory not found: {models_dir}")
+            return {}
+        
+        results = {}
+        
+        print(f"🔄 Retrying upload for {len(missing_models)} missing {model_type} models...")
+        
+        for endpoint_name in missing_models:
+            model_file = f"{endpoint_name}_attentivefp_best.pt"
+            model_path = os.path.join(models_dir, model_file)
+            
+            if not os.path.exists(model_path):
+                print(f"❌ Model file not found: {model_path}")
+                results[endpoint_name] = None
+                continue
+            
+            print(f"\n🔄 Retrying {model_type} model: {endpoint_name}")
             repo_url = self.upload_model(
                 model_path=model_path,
                 endpoint_name=endpoint_name,
@@ -578,7 +686,7 @@ def main():
     # else:
     #     print(f"❌ Model not found: {ames_model_path}")
     
-    # Uncomment below to upload all models
+    # Upload all models with updated descriptions
     print("\\n📦 Uploading all classification models...")
     classification_results = uploader.upload_all_classification_models()
     
@@ -596,6 +704,8 @@ def main():
     for endpoint, url in {**classification_results, **regression_results}.items():
         if url:
             print(f"   {endpoint}: {url}")
+        else:
+            print(f"   {endpoint}: ❌ Failed to upload")
 
 
 if __name__ == "__main__":
