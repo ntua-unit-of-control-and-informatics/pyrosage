@@ -1,11 +1,11 @@
 === Best Model ===
 metric,value
 Dataset,Endocrine_Disruption_NR-AR
-Accuracy,0.9290730337078652
-Precision,0.29591836734693877
+Accuracy,0.9262640449438202
+Precision,0.28431372549019607
 Recall,0.47540983606557374
-F1 Score,0.36477987421383645
-AUC,0.7669076169972217
+F1 Score,0.3558282208588957
+AUC,0.728082941438245
 name,class_imbalance_focused
 hidden_channels,64
 num_layers,2

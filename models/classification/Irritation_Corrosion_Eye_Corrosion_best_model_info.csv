@@ -1,18 +1,18 @@
 === Best Model ===
 metric,value
 Dataset,Irritation_Corrosion_Eye_Corrosion
-Accuracy,0.89086859688196
-Precision,0.8137254901960784
-Recall,0.9378531073446328
-F1 Score,0.8713910761154856
-AUC,0.9657485875706214
-name,larger_model
-hidden_channels,128
-num_layers,3
+Accuracy,0.9131403118040089
+Precision,0.8709677419354839
+Recall,0.9152542372881356
+F1 Score,0.8925619834710744
+AUC,0.9723122299767365
+name,class_imbalance_focused
+hidden_channels,64
+num_layers,2
 num_timesteps,3
-dropout,0.1
+dropout,0.3
 learning_rate,0.0005
 weight_decay,0.0001
-batch_size,32
-epochs,50
-patience,10
+batch_size,16
+epochs,75
+patience,15
