@@ -748,7 +748,7 @@ if __name__ == "__main__":
         all_results_df = pd.DataFrame(all_results)
 
         # Save all results to CSV
-        all_results_df.to_csv("{project_root}models/classification/classification_all_results.csv", index=False)
+        all_results_df.to_csv(f"{project_root}models/classification/classification_all_results.csv", index=False)
 
         # Create a summary of best models for each dataset
         best_models_summary = []
@@ -768,7 +768,7 @@ if __name__ == "__main__":
             })
 
         best_models_df = pd.DataFrame(best_models_summary)
-        best_models_df.to_csv("{project_root}models/classification/classification_best_models_summary.csv", index=False)
+        best_models_df.to_csv(f"{project_root}models/classification/classification_best_models_summary.csv", index=False)
 
         print("\n=== Best Models Summary ===")
         print(best_models_df)
