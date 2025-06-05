@@ -1,12 +1,12 @@
-import os
 import json
-import torch
+import os
 import shutil
 import tempfile
-from pathlib import Path
-from huggingface_hub import HfApi, Repository, create_repo, upload_folder
-from huggingface_hub.utils import HfFolder
+
 import pandas as pd
+import torch
+from huggingface_hub import HfApi, create_repo, upload_folder
+from huggingface_hub.utils import HfFolder
 
 
 class PyrosageModelUploader:
@@ -565,21 +565,20 @@ def main():
     print(f"👤 Using credentials from user: {uploader.hf_username}")
     
     # Example: Upload a single model
-    print("\\n🧪 Example: Uploading AMES classification model...")
-    ames_model_path = "../models/classification/AMES_attentivefp_best.pt"
-    if os.path.exists(ames_model_path):
-        repo_url = uploader.upload_model(
-            model_path=ames_model_path,
-            endpoint_name="AMES",
-            model_type="classification"
-        )
-        if repo_url:
-            print(f"🎉 AMES model uploaded: {repo_url}")
-    else:
-        print(f"❌ Model not found: {ames_model_path}")
+    # print("\\n🧪 Example: Uploading AMES classification model...")
+    # ames_model_path = "../models/classification/AMES_attentivefp_best.pt"
+    # if os.path.exists(ames_model_path):
+    #     repo_url = uploader.upload_model(
+    #         model_path=ames_model_path,
+    #         endpoint_name="AMES",
+    #         model_type="classification"
+    #     )
+    #     if repo_url:
+    #         print(f"🎉 AMES model uploaded: {repo_url}")
+    # else:
+    #     print(f"❌ Model not found: {ames_model_path}")
     
     # Uncomment below to upload all models
-    """
     print("\\n📦 Uploading all classification models...")
     classification_results = uploader.upload_all_classification_models()
     
@@ -597,7 +596,6 @@ def main():
     for endpoint, url in {**classification_results, **regression_results}.items():
         if url:
             print(f"   {endpoint}: {url}")
-    """
 
 
 if __name__ == "__main__":
