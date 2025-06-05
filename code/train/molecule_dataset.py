@@ -75,8 +75,8 @@ class MoleculeDataset(Dataset):
             data_list.append(data)
         return data_list
 
-    def len(self):
+    def __len__(self):
         return len(self.data_list)
 
-    def get(self, idx):
+    def __getitem__(self, idx):
         return self.data_list[idx]
