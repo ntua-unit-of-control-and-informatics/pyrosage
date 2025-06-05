@@ -14,7 +14,7 @@ class PyrosageModelUploader:
     Upload Pyrosage AttentiveFP models to Hugging Face Hub with proper documentation
     """
     
-    def __init__(self, hf_username=None):
+    def __init__(self, hf_username=None, organization=None):
         """
         Initialize the uploader
         
@@ -22,9 +22,12 @@ class PyrosageModelUploader:
         -----------
         hf_username: str
             Hugging Face username. If None, will try to get from token
+        organization: str
+            Organization name to upload to (e.g., "upci-ntua")
         """
         self.api = HfApi()
         self.hf_username = hf_username or self._get_username()
+        self.organization = organization
         
     def _get_username(self):
         """Get username from HF token"""
@@ -228,7 +231,7 @@ If you use this model, please cite the Pyrosage project:
   author={{Pyrosage Team}},
   year={{2024}},
   publisher={{Hugging Face}},
-  url={{https://huggingface.co/{self.hf_username or "USER"}/pyrosage-{endpoint_name.lower()}-attentivefp}}
+  url={{https://huggingface.co/{self.organization or self.hf_username or "USER"}/pyrosage-{endpoint_name.lower()}-attentivefp}}
 }}
 ```
 
@@ -478,7 +481,9 @@ numpy>=1.21.0
         if repo_name is None:
             repo_name = f"pyrosage-{endpoint_name.lower()}-attentivefp"
         
-        repo_id = f"{self.hf_username}/{repo_name}"
+        # Use organization if specified, otherwise use username
+        namespace = self.organization if self.organization else self.hf_username
+        repo_id = f"{namespace}/{repo_name}"
         
         try:
             # Create repository
@@ -547,8 +552,8 @@ def main():
     print("🚀 Pyrosage Models - Hugging Face Upload Script")
     print("=" * 60)
     
-    # Initialize uploader
-    uploader = PyrosageModelUploader()
+    # Initialize uploader with UPCI-NTUA organization
+    uploader = PyrosageModelUploader(organization="upci-ntua")
     
     if not uploader.hf_username:
         print("❌ Please login to Hugging Face first:")
@@ -556,7 +561,8 @@ def main():
         print("   huggingface-cli login")
         return
     
-    print(f"📝 Uploading models for user: {uploader.hf_username}")
+    print(f"📝 Uploading models to organization: upci-ntua")
+    print(f"👤 Using credentials from user: {uploader.hf_username}")
     
     # Example: Upload a single model
     print("\\n🧪 Example: Uploading AMES classification model...")
