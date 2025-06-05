@@ -31,15 +31,16 @@ from molecule_dataset import MoleculeDataset
 # Suppress RDKit warnings
 RDLogger.DisableLog('rdApp.*')
 
-DATA_DIR = "../../data/classification"
+project_root = "../../"
+DATA_DIR = "%sdata/classification" % project_root
 
 # Set up device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
 # Create directories for saving results
-os.makedirs("../../models/classification", exist_ok=True)
-os.makedirs("../../plots", exist_ok=True)
+os.makedirs(project_root, exist_ok=True)
+os.makedirs("%splots" % project_root, exist_ok=True)
 
 # Define evaluation metrics and visualization functions
 
@@ -297,7 +298,7 @@ def train_and_evaluate(model_name, hyperparams):
     plt.figure(figsize=(10, 6))
     sns.countplot(x='active', data=df)
     plt.title(f'Distribution of Target Classes - {model_name}')
-    plt.savefig(f"../plots/{model_name}_target_distribution.png")
+    plt.savefig(f"%splots/{model_name}_target_distribution.png" % project_root)
     plt.close()
 
     # Split data with stratification to maintain class balance before SMOTE
@@ -545,17 +546,17 @@ def train_and_evaluate(model_name, hyperparams):
     # Generate and save plots only if data is available
     if len(history['train_loss']) > 0 : # Check if training actually ran
         fig_hist = plot_training_history(history, title=f'Training History - {model_name}')
-        fig_hist.savefig(f"../plots/{model_name}_training_history.png")
+        fig_hist.savefig(f"%splots/{model_name}_training_history.png" % project_root)
         plt.close(fig_hist)
     
     if final_test_targets.size > 0 and final_test_preds.size > 0:
         binary_test_preds = (final_test_preds > 0.5).astype(int)
         fig_cm = plot_confusion_matrix(final_test_targets, binary_test_preds, title=f'Confusion Matrix (Test) - {model_name}')
-        fig_cm.savefig(f"../plots/{model_name}_confusion_matrix.png")
+        fig_cm.savefig(f"%splots/{model_name}_confusion_matrix.png" % project_root)
         plt.close(fig_cm)
         
         fig_roc = plot_roc_curve(final_test_targets, final_test_preds, title=f'ROC Curve (Test) - {model_name}')
-        fig_roc.savefig(f"../plots/{model_name}_roc_curve.png")
+        fig_roc.savefig(f"%splots/{model_name}_roc_curve.png" % project_root)
         plt.close(fig_roc)
     
     plt.close('all') # Close any other stray plots
@@ -623,8 +624,8 @@ hyperparameter_configs = [
 
 if __name__ == "__main__":
     # Create directories for saving results
-    os.makedirs("../../models/classification", exist_ok=True)
-    os.makedirs("../../plots", exist_ok=True)
+    os.makedirs("%smodels/classification" % project_root, exist_ok=True)
+    os.makedirs("%splots" % project_root, exist_ok=True)
 
     all_datasets = [f for f in os.listdir(DATA_DIR) if isfile(join(DATA_DIR, f))]
     all_results = []

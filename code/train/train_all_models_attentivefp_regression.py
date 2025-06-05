@@ -31,11 +31,12 @@ RDLogger.DisableLog('rdApp.*')
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
-DATA_DIR = "../../data/regression"
+project_root = "../../"
+DATA_DIR = "%sdata/regression" % project_root
 
 # Create directories for saving results
-os.makedirs("../../models/regression", exist_ok=True)
-os.makedirs("../../plots", exist_ok=True)
+os.makedirs("%smodels/regression" % project_root, exist_ok=True)
+os.makedirs("%splots" % project_root, exist_ok=True)
 
 # Define evaluation metrics and visualization functions
 def plot_scatter(y_true, y_pred, title='Predicted vs Actual'):
@@ -231,7 +232,7 @@ def train_and_evaluate(model_name, hyperparams):
     plt.figure(figsize=(10, 6))
     sns.histplot(df["active"], kde=True)
     plt.title(f"Distribution of Target Values - {model_name}")
-    plt.savefig(f"../plots/{model_name}_target_distribution.png")
+    plt.savefig(f"%splots/{model_name}_target_distribution.png" % project_root)
     plt.close()
 
     # Split data - no need for stratification in regression
@@ -379,7 +380,7 @@ def train_and_evaluate(model_name, hyperparams):
     # Generate and save plots
     # 1. Training history
     fig = plot_training_history(history, title=f"Training History - {model_name}")
-    fig.savefig(f"../plots/{model_name}_training_history.png")
+    fig.savefig(f"%splots/{model_name}_training_history.png" % project_root)
     plt.close()
 
     # 2. Scatter plot of predicted vs actual (test set)
@@ -388,7 +389,7 @@ def train_and_evaluate(model_name, hyperparams):
         final_test_preds,
         title=f"Predicted vs Actual (Test) - {model_name}",
     )
-    fig.savefig(f"../plots/{model_name}_scatter_plot.png")
+    fig.savefig(f"%splots/{model_name}_scatter_plot.png" % project_root)
     plt.close()
 
     # 3. Residuals plot
@@ -397,7 +398,7 @@ def train_and_evaluate(model_name, hyperparams):
         final_test_preds,
         title=f"Residuals Plot (Test) - {model_name}",
     )
-    fig.savefig(f"../plots/{model_name}_residuals.png")
+    fig.savefig(f"%splots/{model_name}_residuals.png" % project_root)
     plt.close()
 
     # Return metrics and the trained model (not saving it yet)
@@ -500,7 +501,7 @@ if __name__ == "__main__":
             plt.title("R² (higher is better)")
 
             plt.tight_layout()
-            plt.savefig(f"../plots/{model_name}_hyperparameter_comparison.png")
+            plt.savefig(f"%splots/{model_name}_hyperparameter_comparison.png" % project_root)
             plt.close()
 
             # If we found a best model
@@ -524,7 +525,7 @@ if __name__ == "__main__":
                         print(f"  {key}: {value}")
 
                 # Save only the best model with its hyperparameters
-                best_model_path = f"../models/regression/{model_name}_attentivefp_best.pt"
+                best_model_path = f"%smodels/regression/{model_name}_attentivefp_best.pt" % project_root
                 torch.save(
                     {
                         "model_state_dict": best_model.state_dict(),
