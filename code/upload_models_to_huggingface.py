@@ -228,8 +228,8 @@ If you use this model, please cite the Pyrosage project:
 ```bibtex
 @misc{{pyrosage{endpoint_name.lower()},
   title={{Pyrosage {endpoint_name} AttentiveFP Model}},
-  author={{Pyrosage Team}},
-  year={{2024}},
+  author={{UPCI NTUA}},
+  year={{2025}},
   publisher={{Hugging Face}},
   url={{https://huggingface.co/{self.organization or self.hf_username or "USER"}/pyrosage-{endpoint_name.lower()}-attentivefp}}
 }}
