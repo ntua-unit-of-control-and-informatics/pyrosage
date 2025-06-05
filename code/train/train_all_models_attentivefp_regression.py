@@ -1,26 +1,21 @@
-import logging
-import os
 import math
+import os
+from collections import defaultdict
 from os.path import isfile, join
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
-from collections import defaultdict
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.model_selection import train_test_split
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch_geometric.data import Data, Dataset
+from rdkit import RDLogger
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.model_selection import train_test_split
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import AttentiveFP
-
-from rdkit import Chem
-from rdkit.Chem import AllChem
-from rdkit import RDLogger
 
 from molecule_dataset import MoleculeDataset
 
