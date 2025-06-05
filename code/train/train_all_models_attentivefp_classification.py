@@ -32,7 +32,7 @@ from molecule_dataset import MoleculeDataset
 RDLogger.DisableLog('rdApp.*')
 
 project_root = "../../"
-DATA_DIR = "%sdata/classification" % project_root
+DATA_DIR = f"{project_root}data/classification"
 
 # Set up device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -40,7 +40,7 @@ print(f"Using device: {device}")
 
 # Create directories for saving results
 os.makedirs(project_root, exist_ok=True)
-os.makedirs("%splots" % project_root, exist_ok=True)
+os.makedirs(f"{project_root}plots", exist_ok=True)
 
 # Define evaluation metrics and visualization functions
 
@@ -298,7 +298,7 @@ def train_and_evaluate(model_name, hyperparams):
     plt.figure(figsize=(10, 6))
     sns.countplot(x='active', data=df)
     plt.title(f'Distribution of Target Classes - {model_name}')
-    plt.savefig(f"%splots/{model_name}_target_distribution.png" % project_root)
+    plt.savefig(f"{project_root}/{model_name}_target_distribution.png")
     plt.close()
 
     # Split data with stratification to maintain class balance before SMOTE
@@ -546,17 +546,17 @@ def train_and_evaluate(model_name, hyperparams):
     # Generate and save plots only if data is available
     if len(history['train_loss']) > 0 : # Check if training actually ran
         fig_hist = plot_training_history(history, title=f'Training History - {model_name}')
-        fig_hist.savefig(f"%splots/{model_name}_training_history.png" % project_root)
+        fig_hist.savefig(f"{project_root}plots/{model_name}_training_history.png")
         plt.close(fig_hist)
     
     if final_test_targets.size > 0 and final_test_preds.size > 0:
         binary_test_preds = (final_test_preds > 0.5).astype(int)
         fig_cm = plot_confusion_matrix(final_test_targets, binary_test_preds, title=f'Confusion Matrix (Test) - {model_name}')
-        fig_cm.savefig(f"%splots/{model_name}_confusion_matrix.png" % project_root)
+        fig_cm.savefig(f"{project_root}plots/{model_name}_confusion_matrix.png")
         plt.close(fig_cm)
         
         fig_roc = plot_roc_curve(final_test_targets, final_test_preds, title=f'ROC Curve (Test) - {model_name}')
-        fig_roc.savefig(f"%splots/{model_name}_roc_curve.png" % project_root)
+        fig_roc.savefig(f"{project_root}plots/{model_name}_roc_curve.png")
         plt.close(fig_roc)
     
     plt.close('all') # Close any other stray plots
@@ -624,8 +624,8 @@ hyperparameter_configs = [
 
 if __name__ == "__main__":
     # Create directories for saving results
-    os.makedirs("%smodels/classification" % project_root, exist_ok=True)
-    os.makedirs("%splots" % project_root, exist_ok=True)
+    os.makedirs(f"{project_root}models/classification", exist_ok=True)
+    os.makedirs(f"{project_root}plots", exist_ok=True)
 
     all_datasets = [f for f in os.listdir(DATA_DIR) if isfile(join(DATA_DIR, f))]
     all_results = []
@@ -691,7 +691,7 @@ if __name__ == "__main__":
             plt.title("F1 Score")
 
             plt.tight_layout()
-            plt.savefig(f"../plots/{model_name}_hyperparameter_comparison.png")
+            plt.savefig(f"{project_root}plots/{model_name}_hyperparameter_comparison.png")
             plt.close()
 
             # If we found a best model
@@ -722,7 +722,7 @@ if __name__ == "__main__":
                         print(f"  {key}: {value}")
 
                 # Save only the best model with its hyperparameters
-                best_model_path = f"../models/classification/{model_name}_attentivefp_best.pt"
+                best_model_path = f"{project_root}models/classification/{model_name}_attentivefp_best.pt"
                 torch.save({
                     'model_state_dict': best_model.state_dict(),
                     'hyperparameters': best_config
@@ -738,7 +738,7 @@ if __name__ == "__main__":
                 best_model_df = pd.DataFrame(best_model_info)
 
                 # Save to CSV
-                with open(f"../models/classification/{model_name}_best_model_info.csv", 'w') as f:
+                with open(f"{project_root}models/classification/{model_name}_best_model_info.csv", 'w') as f:
                     f.write("=== Best Model ===\n")
                     best_model_df.to_csv(f, index=False)
 
@@ -748,7 +748,7 @@ if __name__ == "__main__":
         all_results_df = pd.DataFrame(all_results)
 
         # Save all results to CSV
-        all_results_df.to_csv("../models/classification/classification_all_results.csv", index=False)
+        all_results_df.to_csv("{project_root}models/classification/classification_all_results.csv", index=False)
 
         # Create a summary of best models for each dataset
         best_models_summary = []
@@ -768,7 +768,7 @@ if __name__ == "__main__":
             })
 
         best_models_df = pd.DataFrame(best_models_summary)
-        best_models_df.to_csv("../models/classification/classification_best_models_summary.csv", index=False)
+        best_models_df.to_csv("{project_root}models/classification/classification_best_models_summary.csv", index=False)
 
         print("\n=== Best Models Summary ===")
         print(best_models_df)
@@ -786,5 +786,5 @@ if __name__ == "__main__":
             plt.ylim(0, 1)
 
         plt.tight_layout()
-        plt.savefig("../plots/classification_summary.png")
+        plt.savefig(f"{project_root}plots/classification_summary.png")
         plt.close()
