@@ -26,7 +26,7 @@ from rdkit.Chem import AllChem
 from rdkit import RDLogger
 from imblearn.over_sampling import SMOTE
 
-from .molecule_dataset import MoleculeDataset
+from molecule_dataset import MoleculeDataset
 
 # Suppress RDKit warnings
 RDLogger.DisableLog('rdApp.*')
